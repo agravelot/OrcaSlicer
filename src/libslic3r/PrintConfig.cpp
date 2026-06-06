@@ -518,6 +518,11 @@ static t_config_enum_values s_keys_map_InputShaperType {
     {"Disable", int(InputShaperType::Disable)}
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(InputShaperType)
+static t_config_enum_values s_keys_map_ResonanceAvoidanceScope {
+    {"All",        int(ResonanceAvoidanceScope::All)},
+    {"OuterWall",  int(ResonanceAvoidanceScope::OuterWall)}
+};
+CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(ResonanceAvoidanceScope)
 
 static t_config_enum_values s_keys_map_PerimeterGeneratorType{
     { "classic", int(PerimeterGeneratorType::Classic) },
@@ -4634,6 +4639,17 @@ void PrintConfigDef::init_fff_params()
                      "Please turn this option off when testing ringing.");
     def->mode    = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
+
+    def          = this->add("resonance_avoidance_scope", coEnum);
+    def->label   = L("Resonance avoidance scope");
+    def->tooltip = L("Select which feature types resonance avoidance applies to.\n"
+                     "All: applies to all extrusion moves and travel moves.\n"
+                     "Outer Wall: only applies to outer/external wall extrusions.");
+    def->enum_keys_map = &ConfigOptionEnum<ResonanceAvoidanceScope>::get_enum_values();
+    def->enum_values   = {"All", "OuterWall"};
+    def->enum_labels   = {L("All"), L("Outer Wall")};
+    def->mode    = comAdvanced;
+    def->set_default_value(new ConfigOptionEnum<ResonanceAvoidanceScope>(ResonanceAvoidanceScope::All));
 
     def           = this->add("min_resonance_avoidance_speed", coFloat);
     def->label    = L("Min");

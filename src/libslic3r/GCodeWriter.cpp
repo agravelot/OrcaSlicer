@@ -609,8 +609,11 @@ std::string GCodeWriter::travel_to_xy(const Vec2d &point, const std::string &com
 
     GCodeG1Formatter w;
     w.emit_xy(point_on_plate);
-    auto speed = m_is_first_layer
-        ? this->config.get_abs_value("initial_layer_travel_speed") : this->config.travel_speed.value;
+    auto speed = m_travel_speed_override > 0.0
+        ? m_travel_speed_override
+        : (m_is_first_layer
+            ? this->config.get_abs_value("initial_layer_travel_speed") : this->config.travel_speed.value);
+    m_travel_speed_override = 0.0;
     w.emit_f(speed * 60.0);
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
@@ -695,8 +698,10 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
         used for unlift. */
         // BBS
     Vec3d dest_point = point;
-    auto travel_speed =
-        m_is_first_layer ? this->config.get_abs_value("initial_layer_travel_speed") : this->config.travel_speed.value;
+    auto travel_speed = m_travel_speed_override > 0.0
+        ? m_travel_speed_override
+        : (m_is_first_layer ? this->config.get_abs_value("initial_layer_travel_speed") : this->config.travel_speed.value);
+    m_travel_speed_override = 0.0;
     //BBS: a z_hop need to be handle when travel
     if (std::abs(m_to_lift) > EPSILON) {
         assert(std::abs(m_lifted) < EPSILON);

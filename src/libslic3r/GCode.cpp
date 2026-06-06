@@ -6756,9 +6756,13 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     // ORCA: angle-aware resonance avoidance (per-motor speed decomposition)
     bool resonance_modified_speed = false;
     if (m_config.resonance_avoidance.value) {
-        const double pre_resonance_speed = speed;
-        speed = _compute_resonance_safe_speed(speed, path);
-        resonance_modified_speed = (speed != pre_resonance_speed);
+        const auto scope = m_config.resonance_avoidance_scope.value;
+        if (scope == ResonanceAvoidanceScope::All ||
+            (scope == ResonanceAvoidanceScope::OuterWall && path.role() == ExtrusionRole::erExternalPerimeter)) {
+            const double pre_resonance_speed = speed;
+            speed = _compute_resonance_safe_speed(speed, path);
+            resonance_modified_speed = (speed != pre_resonance_speed);
+        }
     }
     
     bool variable_speed = false;
@@ -7579,6 +7583,22 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
         // }
     }
 
+
+    // ORCA: resonance avoidance for travel moves
+    if (m_config.resonance_avoidance.value && m_config.resonance_avoidance_scope.value == ResonanceAvoidanceScope::All) {
+        const bool is_first_layer = this->on_first_layer();
+        const double base_travel_speed = is_first_layer
+            ? m_config.get_abs_value("initial_layer_travel_speed") : m_config.travel_speed.value;
+        ExtrusionPath temp_path(role);
+        temp_path.polyline = Polyline3(travel);
+        const double resonance_speed = _compute_resonance_safe_speed(base_travel_speed, temp_path);
+        if (resonance_speed != base_travel_speed) {
+            m_writer.set_travel_speed_override(resonance_speed);
+            char buf[64];
+            sprintf(buf, ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+            gcode += buf;
+        }
+    }
 
     // if needed, write the gcode_label_objects_end then gcode_label_objects_start
     m_writer.add_object_change_labels(gcode);

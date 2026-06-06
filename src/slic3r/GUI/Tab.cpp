@@ -4839,6 +4839,7 @@ PageShp TabPrinter::build_kinematics_page()
     // resonance avoidance ported over from qidi slicer
     optgroup = page->new_optgroup(L("Resonance Compensation"), "param_resonance_avoidance");
     optgroup->append_single_option_line("resonance_avoidance", "printer_motion_ability#resonance-avoidance");
+    optgroup->append_single_option_line("resonance_avoidance_scope", "printer_motion_ability#resonance-avoidance");
     // Per-motor resonance speed ranges (one min,max pair per line)
     {
         Option opt_a = optgroup->get_option("resonance_motor_a_speeds");
@@ -5635,6 +5636,7 @@ void TabPrinter::toggle_options()
         toggle_option("emit_machine_limits_to_gcode", emittable_limits);
 
         bool resonance_avoidance = m_config->opt_bool("resonance_avoidance");
+        toggle_option("resonance_avoidance_scope", resonance_avoidance);
         toggle_option("min_resonance_avoidance_speed", resonance_avoidance);
         toggle_option("max_resonance_avoidance_speed", resonance_avoidance);
         toggle_option("resonance_motor_a_speeds", resonance_avoidance);
