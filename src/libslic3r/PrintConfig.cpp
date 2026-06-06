@@ -523,6 +523,11 @@ static t_config_enum_values s_keys_map_ResonanceAvoidanceScope {
     {"OuterWall",  int(ResonanceAvoidanceScope::OuterWall)}
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(ResonanceAvoidanceScope)
+static t_config_enum_values s_keys_map_ResonanceAvoidanceMode {
+    {"ClampLower",  int(ResonanceAvoidanceMode::ClampLower)},
+    {"Nearest",     int(ResonanceAvoidanceMode::Nearest)}
+};
+CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(ResonanceAvoidanceMode)
 
 static t_config_enum_values s_keys_map_PerimeterGeneratorType{
     { "classic", int(PerimeterGeneratorType::Classic) },
@@ -4650,6 +4655,17 @@ void PrintConfigDef::init_fff_params()
     def->enum_labels   = {L("All"), L("Outer Wall")};
     def->mode    = comAdvanced;
     def->set_default_value(new ConfigOptionEnum<ResonanceAvoidanceScope>(ResonanceAvoidanceScope::All));
+
+    def          = this->add("resonance_avoidance_mode", coEnum);
+    def->label   = L("Mode");
+    def->tooltip = L("Behavior when speed falls into a resonance danger zone.\n"
+                     "Clamp Lower: always slow down below the zone.\n"
+                     "Nearest: clamp to whichever boundary (lower or upper) is closer.");
+    def->enum_keys_map = &ConfigOptionEnum<ResonanceAvoidanceMode>::get_enum_values();
+    def->enum_values   = {"ClampLower", "Nearest"};
+    def->enum_labels   = {L("Clamp Lower"), L("Nearest")};
+    def->mode    = comAdvanced;
+    def->set_default_value(new ConfigOptionEnum<ResonanceAvoidanceMode>(ResonanceAvoidanceMode::ClampLower));
 
     def           = this->add("min_resonance_avoidance_speed", coFloat);
     def->label    = L("Min");

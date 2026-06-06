@@ -383,6 +383,11 @@ enum class ResonanceAvoidanceScope : unsigned char {
     OuterWall
 };
 
+enum class ResonanceAvoidanceMode : unsigned char {
+    ClampLower = 0,
+    Nearest
+};
+
 // BBS
 enum ZHopType {
     zhtAuto = 0,
@@ -548,6 +553,7 @@ CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(BedType)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(SkirtType)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(InputShaperType)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(ResonanceAvoidanceScope)
+CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(ResonanceAvoidanceMode)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(DraftShield)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(ForwardCompatibilitySubstitutionRule)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(GCodeThumbnailsFormat)
@@ -1290,6 +1296,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     //resonance avoidance ported from qidi slicer
     ((ConfigOptionBool,                 resonance_avoidance))
     ((ConfigOptionEnum<ResonanceAvoidanceScope>, resonance_avoidance_scope))
+    ((ConfigOptionEnum<ResonanceAvoidanceMode>, resonance_avoidance_mode))
     ((ConfigOptionFloat,                min_resonance_avoidance_speed))
     ((ConfigOptionFloat,                max_resonance_avoidance_speed))
     ((ConfigOptionStrings,              resonance_motor_a_speeds))

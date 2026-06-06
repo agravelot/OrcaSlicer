@@ -6416,15 +6416,21 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &
     const bool per_motor_configured =
         speeds_A.size() >= 2 || speeds_B.size() >= 2;
 
+    const auto rmode = m_config.resonance_avoidance_mode.value;
+
     if (!per_motor_configured) {
         if (toolhead_speed < m_config.max_resonance_avoidance_speed.value) {
-            double mid = m_config.min_resonance_avoidance_speed.value +
-                (m_config.max_resonance_avoidance_speed.value -
-                 m_config.min_resonance_avoidance_speed.value) / 2.0;
-            if (toolhead_speed < mid)
-                toolhead_speed = std::min(toolhead_speed, m_config.min_resonance_avoidance_speed.value);
-            else
-                toolhead_speed = m_config.max_resonance_avoidance_speed.value;
+            const double lo = m_config.min_resonance_avoidance_speed.value;
+            const double hi = m_config.max_resonance_avoidance_speed.value;
+            if (rmode == ResonanceAvoidanceMode::Nearest) {
+                toolhead_speed = (toolhead_speed - lo <= hi - toolhead_speed) ? lo : hi;
+            } else {
+                double mid = lo + (hi - lo) / 2.0;
+                if (toolhead_speed < mid)
+                    toolhead_speed = std::min(toolhead_speed, lo);
+                else
+                    toolhead_speed = hi;
+            }
         }
         return toolhead_speed;
     }
@@ -6466,7 +6472,14 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &
             if (hi <= 0.0)
                 continue;
             if (motor_spd > lo && motor_spd < hi) {
-                safe_speed = std::min(safe_speed, lo / factor);
+                if (rmode == ResonanceAvoidanceMode::Nearest) {
+                    const double lo_toolhead = lo / factor;
+                    const double hi_toolhead = hi / factor;
+                    const double clamped = (toolhead_speed - lo_toolhead <= hi_toolhead - toolhead_speed) ? lo_toolhead : hi_toolhead;
+                    safe_speed = std::min(safe_speed, clamped);
+                } else {
+                    safe_speed = std::min(safe_speed, lo / factor);
+                }
                 break;
             }
         }
