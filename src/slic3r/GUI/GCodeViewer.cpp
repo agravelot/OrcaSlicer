@@ -1091,6 +1091,8 @@ void GCodeViewer::update_by_mode(ConfigOptionMode mode)
     view_type_items.push_back(libvgcode::EViewType::Temperature);
 // ORCA: Add Pressure Advance visualization support
     view_type_items.push_back(libvgcode::EViewType::PressureAdvance);
+    // ORCA: Add Resonance Avoidance visualization support
+    view_type_items.push_back(libvgcode::EViewType::ResonanceAvoidance);
     //if (mode == ConfigOptionMode::comDevelop) {
     //    view_type_items.push_back(EViewType::Tool);
     //}
@@ -1313,6 +1315,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
     m_gcode_result = &gcode_result;
     m_move_type_counts.fill(0);
     m_resonance_avoided_count = 0;
+    m_resonance_avoided_distance = 0.0f;
     for (auto& move_type_times : m_move_type_times)
         move_type_times.fill(0.0f);
     m_move_type_distances.fill(0.0f);
@@ -1330,8 +1333,10 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
             else
                 m_move_type_distances[move_type] += move.travel_dist;
         }
-        if (move.resonance_avoided)
+        if (move.resonance_avoided) {
             ++m_resonance_avoided_count;
+            m_resonance_avoided_distance += move.travel_dist;
+        }
     }
     m_only_gcode_in_preview = only_gcode;
 
@@ -1497,6 +1502,7 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
 
     m_move_type_counts.fill(0);
     m_resonance_avoided_count = 0;
+    m_resonance_avoided_distance = 0.0f;
     for (auto& move_type_times : m_move_type_times)
         move_type_times.fill(0.0f);
     m_move_type_distances.fill(0.0f);
@@ -1517,8 +1523,15 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
                 m_move_type_distances[move_type] += std::sqrt(dx * dx + dy * dy + dz * dz);
             }
         }
-        if (vertex.resonance_avoided)
+        if (vertex.resonance_avoided) {
             ++m_resonance_avoided_count;
+            if (i > 0) {
+                const float dx = vertex.position[0] - data.vertices[i - 1].position[0];
+                const float dy = vertex.position[1] - data.vertices[i - 1].position[1];
+                const float dz = vertex.position[2] - data.vertices[i - 1].position[2];
+                m_resonance_avoided_distance += std::sqrt(dx * dx + dy * dy + dz * dz);
+            }
+        }
     }
 
     m_viewer.set_extrusion_role_color(libvgcode::EGCodeExtrusionRole::Skirt,                    { 127, 255, 127 });
@@ -1570,6 +1583,7 @@ void GCodeViewer::reset()
     m_filament_densities = std::vector<float>();
     m_move_type_counts.fill(0);
     m_resonance_avoided_count = 0;
+    m_resonance_avoided_distance = 0.0f;
     for (auto& move_type_times : m_move_type_times)
         move_type_times.fill(0.0f);
     m_move_type_distances.fill(0.0f);
@@ -3718,6 +3732,8 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     case libvgcode::EViewType::Temperature:    { imgui.title(_u8L("Temperature (°C)")); break; }
 // ORCA: Add Pressure Advance visualization support
     case libvgcode::EViewType::PressureAdvance:{ imgui.title(_u8L("Pressure Advance")); break; }
+    // ORCA: Add Resonance Avoidance visualization support
+    case libvgcode::EViewType::ResonanceAvoidance:{ imgui.title(_u8L("Resonance Avoidance")); break; }
     case libvgcode::EViewType::VolumetricFlowRate:
         { imgui.title(_u8L("Volumetric flow rate (mm³/s)")); break; }
     case libvgcode::EViewType::ActualVolumetricFlowRate:
@@ -3918,24 +3934,6 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
             }
         }
 
-        // ORCA: Resonance avoidance overlay toggle
-        {
-            const bool resonance_visible = m_viewer.is_resonance_avoided_visible();
-            const libvgcode::Color resonance_color = m_viewer.get_resonance_avoided_color();
-            const bool full_layout = offsets.size() > 4;
-            std::vector<std::pair<std::string, float>> columns_offsets;
-            columns_offsets.push_back({ _u8L("Resonance avoided"), offsets[0] });
-            columns_offsets.push_back({ "", offsets[1] });
-            columns_offsets.push_back({ "", offsets[2] });
-            columns_offsets.push_back({ full_layout ? format_compact_count(m_resonance_avoided_count) : "", offsets[3] });
-            columns_offsets.push_back({ "", offsets[4] });
-            append_item(EItemType::Rect, libvgcode::convert(resonance_color), columns_offsets,
-                true, offsets.back(), resonance_visible, [this]() {
-                    m_viewer.toggle_resonance_avoided_visibility();
-                    update_moves_slider();
-                });
-        }
-
         break;
     }
     case libvgcode::EViewType::Height:                   { append_range(m_viewer.get_color_range(libvgcode::EViewType::Height), 2); break; }
@@ -4002,6 +4000,26 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         append_item(EItemType::None, libvgcode::convert(m_viewer.get_option_color(libvgcode::EOptionType::Travels)), { {_u8L("Travel"), offsets[0] }}, true, predictable_icon_pos/*ORCA checkbox_pos*/, travel_visible, [this, travel_visible]() {
             m_viewer.toggle_option_visibility(libvgcode::EOptionType::Travels);
             update_moves_slider();
+            });
+        ImGui::PopStyleVar(1);
+        break;
+    }
+    // ORCA: Add Resonance Avoidance visualization support
+    case libvgcode::EViewType::ResonanceAvoidance:
+    {
+        const bool resonance_visible = m_viewer.is_resonance_avoided_visible();
+        const libvgcode::Color resonance_color = m_viewer.get_resonance_avoided_color();
+        const std::string distance_text = format_distance(m_resonance_avoided_distance);
+        const std::string count_text = format_compact_count(m_resonance_avoided_count);
+        const std::string info = distance_text + "  " + count_text;
+        offsets = calculate_offsets({ { _u8L("Options"), { distance_text, info }}, { _u8L("Display"), {""}} }, icon_size);
+        append_headers({ {_u8L("Options"), offsets[0] }, { _u8L("Display"), offsets[1]} });
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 3.0f));
+        append_item(EItemType::Rect, libvgcode::convert(resonance_color),
+            { {_u8L("Resonance avoided"), offsets[0]}, {info, offsets[1]} },
+            true, predictable_icon_pos, resonance_visible, [this]() {
+                m_viewer.toggle_resonance_avoided_visibility();
+                update_moves_slider();
             });
         ImGui::PopStyleVar(1);
         break;

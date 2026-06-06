@@ -98,6 +98,8 @@ enum class EViewType : uint8_t
     Acceleration,
     // ORCA: Add Jerk visualization support
     Jerk,
+    // ORCA: Add Resonance Avoidance visualization support
+    ResonanceAvoidance,
     Tool,
     COUNT
 };

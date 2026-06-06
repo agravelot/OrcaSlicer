@@ -1476,9 +1476,7 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
     {
     case EViewType::FeatureType:
     {
-        return (v.is_extrusion() && v.resonance_avoided && m_settings.resonance_avoided_visible) ?
-            m_settings.resonance_avoided_color :
-            (v.is_travel() ? get_option_color(move_type_to_option(v.type)) : get_extrusion_role_color(v.role));
+        return v.is_travel() ? get_option_color(move_type_to_option(v.type)) : get_extrusion_role_color(v.role);
     }
     case EViewType::Height:
     {
@@ -1547,6 +1545,13 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
     {
         return m_layers.layer_contains_colorprint_options(static_cast<size_t>(v.layer_id)) ? DUMMY_COLOR :
             m_color_print_colors[static_cast<size_t>(v.color_id) % m_color_print_colors.size()];
+    }
+    // ORCA: Add Resonance Avoidance visualization support
+    case EViewType::ResonanceAvoidance:
+    {
+        return (v.resonance_avoided && m_settings.resonance_avoided_visible) ?
+            m_settings.resonance_avoided_color :
+            (v.is_travel() ? get_option_color(move_type_to_option(v.type)) : get_extrusion_role_color(v.role));
     }
     default: { break; }
     }
