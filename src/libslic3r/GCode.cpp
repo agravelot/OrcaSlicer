@@ -6351,6 +6351,37 @@ double GCode::calc_max_volumetric_speed(const double layer_height, const double 
 
 double GCode::_compute_resonance_safe_speed(double toolhead_speed, const ExtrusionPath &path) const
 {
+    const Points3 &pts = path.polyline.points;
+    if (pts.size() < 2)
+        return toolhead_speed;
+
+    double seg_length = 0.0;
+    for (size_t i = 1; i < pts.size(); ++i)
+        seg_length += (Vec2d(pts[i].x() - pts[i-1].x(), pts[i].y() - pts[i-1].y())).norm();
+    seg_length *= SCALING_FACTOR;
+
+    Point3 first = pts.front();
+    Point3 last  = pts.back();
+    Vec2d dir(double(last.x() - first.x()), double(last.y() - first.y()));
+    double dir_len = dir.norm();
+    if (dir_len < EPSILON) {
+        if (pts.size() >= 3) {
+            first = pts[1];
+            dir = Vec2d(double(last.x() - first.x()), double(last.y() - first.y()));
+            dir_len = dir.norm();
+            if (dir_len < EPSILON)
+                return toolhead_speed;
+        } else {
+            return toolhead_speed;
+        }
+    }
+    dir /= dir_len;
+
+    return _compute_resonance_safe_speed(toolhead_speed, dir, seg_length);
+}
+
+double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &direction, double segment_length) const
+{
     auto parse_ranges = [](const std::string &str) -> std::vector<double> {
         std::vector<double> ranges;
         if (str.empty())
@@ -6386,7 +6417,6 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Extrusi
         speeds_A.size() >= 2 || speeds_B.size() >= 2;
 
     if (!per_motor_configured) {
-        // Fallback: legacy toolhead-speed-only logic
         if (toolhead_speed < m_config.max_resonance_avoidance_speed.value) {
             double mid = m_config.min_resonance_avoidance_speed.value +
                 (m_config.max_resonance_avoidance_speed.value -
@@ -6399,49 +6429,17 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Extrusi
         return toolhead_speed;
     }
 
-    // Angle-aware per-motor resonance avoidance
     const PrinterStructure kin = m_config.printer_structure.value;
     if (kin == PrinterStructure::psDelta)
         return toolhead_speed;
 
-    // Skip short segments — they never reach cruise speed, so resonance adjustment
-    // only creates artefacts without reducing ringing.
-    const Points3 &pts = path.polyline.points;
-    if (pts.size() < 2)
+    const double min_seg_len = m_config.resonance_min_segment_length.value;
+    if (min_seg_len > 0.0 && segment_length < min_seg_len)
         return toolhead_speed;
 
-    const double min_seg_len = m_config.resonance_min_segment_length.value;
-    if (min_seg_len > 0.0) {
-        double seg_length = 0.0;
-        for (size_t i = 1; i < pts.size(); ++i)
-            seg_length += (Vec2d(pts[i].x() - pts[i-1].x(), pts[i].y() - pts[i-1].y())).norm();
-        seg_length *= SCALING_FACTOR;
-        if (seg_length < min_seg_len)
-            return toolhead_speed;
-    }
+    const double cos_theta = direction.x();
+    const double sin_theta = direction.y();
 
-    // Compute movement direction from polyline
-    Point3 first = pts.front();
-    Point3 last  = pts.back();
-    Vec2d dir(double(last.x() - first.x()), double(last.y() - first.y()));
-    double dir_len = dir.norm();
-    if (dir_len < EPSILON) {
-        // Closed path (e.g. perimeter loop): use first segment direction
-        if (pts.size() >= 3) {
-            first = pts[1];
-            dir = Vec2d(double(last.x() - first.x()), double(last.y() - first.y()));
-            dir_len = dir.norm();
-            if (dir_len < EPSILON)
-                return toolhead_speed;
-        } else {
-            return toolhead_speed;
-        }
-    }
-
-    double cos_theta = dir.x() / dir_len;
-    double sin_theta = dir.y() / dir_len;
-
-    // Trigonometric motor speed decomposition
     double factor_A = 0.0, factor_B = 0.0;
     if (kin == PrinterStructure::psI3) {
         factor_A = std::abs(cos_theta);
@@ -6755,14 +6753,11 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     }
     // ORCA: angle-aware resonance avoidance (per-motor speed decomposition)
     bool resonance_modified_speed = false;
+    bool resonance_scope_active = false;
     if (m_config.resonance_avoidance.value) {
         const auto scope = m_config.resonance_avoidance_scope.value;
-        if (scope == ResonanceAvoidanceScope::All ||
-            (scope == ResonanceAvoidanceScope::OuterWall && path.role() == ExtrusionRole::erExternalPerimeter)) {
-            const double pre_resonance_speed = speed;
-            speed = _compute_resonance_safe_speed(speed, path);
-            resonance_modified_speed = (speed != pre_resonance_speed);
-        }
+        resonance_scope_active = (scope == ResonanceAvoidanceScope::All ||
+            (scope == ResonanceAvoidanceScope::OuterWall && path.role() == ExtrusionRole::erExternalPerimeter));
     }
     
     bool variable_speed = false;
@@ -6826,7 +6821,43 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                                                                               ref_speed, speed, m_config.slowdown_for_curled_perimeters);
             }
             variable_speed = std::any_of(new_points.begin(), new_points.end(),
-                                         [speed](const ProcessedPoint &p) { return fabs(double(p.speed) - speed) > 1; }); // Ignore small speed variations (under 1mm/sec)
+                                         [speed](const ProcessedPoint &p) { return fabs(double(p.speed) - speed) > 1; });
+    }
+
+    // ORCA: apply resonance avoidance after overhang slowdown
+    if (resonance_scope_active) {
+        if (variable_speed && !new_points.empty()) {
+            const Points3 &pts = path.polyline.points;
+            Vec2d prev_pt = pts.empty() ? Vec2d(0, 0) : Vec2d(pts.front().x(), pts.front().y());
+            for (size_t i = 0; i < new_points.size(); ++i) {
+                Vec2d curr_pt(new_points[i].p.x(), new_points[i].p.y());
+                Vec2d seg_dir = curr_pt - prev_pt;
+                double seg_len_xy = seg_dir.norm();
+                if (seg_len_xy < EPSILON && i + 1 < new_points.size()) {
+                    seg_dir = Vec2d(new_points[i + 1].p.x(), new_points[i + 1].p.y()) - prev_pt;
+                    seg_len_xy = seg_dir.norm();
+                }
+                if (seg_len_xy > EPSILON)
+                    seg_dir /= seg_len_xy;
+                seg_len_xy *= SCALING_FACTOR;
+                const double old_spd = double(new_points[i].speed);
+                const double new_spd = _compute_resonance_safe_speed(old_spd, seg_dir, seg_len_xy);
+                if (new_spd != old_spd) {
+                    new_points[i].speed = new_spd;
+                    resonance_modified_speed = true;
+                }
+                prev_pt = curr_pt;
+            }
+            if (resonance_modified_speed) {
+                speed = new_points[0].speed;
+                for (size_t i = 1; i < new_points.size(); ++i)
+                    speed = std::max(speed, double(new_points[i].speed));
+            }
+        } else {
+            const double pre_resonance_speed = speed;
+            speed = _compute_resonance_safe_speed(speed, path);
+            resonance_modified_speed = (speed != pre_resonance_speed);
+        }
     }
 
     double F = speed * 60;  // convert mm/sec to mm/min
