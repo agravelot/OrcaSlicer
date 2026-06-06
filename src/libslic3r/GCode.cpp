@@ -6398,7 +6398,7 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &
             try {
                 double lo = std::stod(line.substr(0, comma_pos));
                 double hi = std::stod(line.substr(comma_pos + 1));
-                if (hi > 0.0) {
+                if (lo >= 0.0 && lo < hi) {
                     ranges.push_back(lo);
                     ranges.push_back(hi);
                 }
@@ -6469,8 +6469,6 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &
         for (size_t i = 0; i + 1 < ranges.size(); i += 2) {
             double lo = ranges[i];
             double hi = ranges[i + 1];
-            if (hi <= 0.0)
-                continue;
             if (motor_spd > lo && motor_spd < hi) {
                 if (rmode == ResonanceAvoidanceMode::Nearest) {
                     const double lo_toolhead = lo / factor;
