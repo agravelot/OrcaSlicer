@@ -3910,6 +3910,24 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
                     });
             }
         }
+
+        // ORCA: Resonance avoidance overlay toggle
+        {
+            const bool resonance_visible = m_viewer.is_resonance_avoided_visible();
+            const libvgcode::Color resonance_color = m_viewer.get_resonance_avoided_color();
+            std::vector<std::pair<std::string, float>> columns_offsets;
+            columns_offsets.push_back({ _u8L("Resonance avoided"), offsets[0] });
+            columns_offsets.push_back({ "", offsets[1] });
+            columns_offsets.push_back({ "", offsets[2] });
+            columns_offsets.push_back({ "", offsets[3] });
+            columns_offsets.push_back({ "", offsets[4] });
+            append_item(EItemType::Rect, libvgcode::convert(resonance_color), columns_offsets,
+                true, offsets.back(), resonance_visible, [this]() {
+                    m_viewer.toggle_resonance_avoided_visibility();
+                    update_moves_slider();
+                });
+        }
+
         break;
     }
     case libvgcode::EViewType::Height:                   { append_range(m_viewer.get_color_range(libvgcode::EViewType::Height), 2); break; }

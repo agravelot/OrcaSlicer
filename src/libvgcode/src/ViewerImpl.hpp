@@ -163,6 +163,11 @@ public:
     void set_option_color(EOptionType type, const Color& color);
     void reset_default_options_colors();
 
+    bool is_resonance_avoided_visible() const;
+    void toggle_resonance_avoided_visibility();
+    const Color& get_resonance_avoided_color() const;
+    void set_resonance_avoided_color(const Color& color);
+
     const ColorRange& get_color_range(EViewType type) const;
     void set_color_range_palette(EViewType type, const Palette& palette);
 

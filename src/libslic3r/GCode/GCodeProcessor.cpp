@@ -75,7 +75,8 @@ const std::vector<std::string> GCodeProcessor::Reserved_Tags = {
     " WIPE_TOWER_END",
     " PA_CHANGE:",
     "@PRINT_TIME_SEC@",
-    "@USED_FILAMENT_LENGTH@"
+    "@USED_FILAMENT_LENGTH@",
+    " RESONANCE_AVOIDED"
 };
 
 const std::vector<std::string> GCodeProcessor::Reserved_Tags_compatible = {
@@ -98,7 +99,8 @@ const std::vector<std::string> GCodeProcessor::Reserved_Tags_compatible = {
     " WIPE_TOWER_END",
     " PA_CHANGE:",
     "@PRINT_TIME_SEC@",
-    "@USED_FILAMENT_LENGTH@"
+    "@USED_FILAMENT_LENGTH@",
+    "RESONANCE_AVOIDED"
 };
 
 
@@ -3095,6 +3097,12 @@ void GCodeProcessor::process_tags(const std::string_view comment, bool producers
         return;
     }
 
+    // ORCA: Resonance avoidance tag
+    if (boost::starts_with(comment, reserved_tag(ETags::ResonanceAvoided))) {
+        m_resonance_avoided = true;
+        return;
+    }
+
     //BBS: flush start tag
     if (boost::starts_with(comment, GCodeProcessor::Flush_Start_Tag)) {
         m_flushing = true;
@@ -5601,8 +5609,11 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         std::max<unsigned int>(1, m_layer_id) - 1,
         internal_only,
         m_object_label_id,
-        m_print_z
+        m_print_z,
+        m_resonance_avoided
     });
+
+    m_resonance_avoided = false;
 
     if (type == EMoveType::Seam) {
         m_seams_count++;

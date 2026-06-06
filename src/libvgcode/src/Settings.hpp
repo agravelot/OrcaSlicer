@@ -69,6 +69,10 @@ struct Settings
 		        true, // SupportTransition
 		        true, // Mixed
 		};
+
+        // ORCA: Resonance avoidance marker
+        bool resonance_avoided_visible{ true };
+        Color resonance_avoided_color{ 255, 105, 180 };
 };
 
 } // namespace libvgcode

@@ -6754,8 +6754,12 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         speed = std::min(speed, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
     }
     // ORCA: angle-aware resonance avoidance (per-motor speed decomposition)
-    if (m_config.resonance_avoidance.value)
+    bool resonance_modified_speed = false;
+    if (m_config.resonance_avoidance.value) {
+        const double pre_resonance_speed = speed;
         speed = _compute_resonance_safe_speed(speed, path);
+        resonance_modified_speed = (speed != pre_resonance_speed);
+    }
     
     bool variable_speed = false;
     std::vector<ProcessedPoint> new_points {};
@@ -6871,6 +6875,13 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
             append_role_gcode("filament_change_extrusion_role_gcode", filament_role_change_gcode);
             append_role_gcode("process_change_extrusion_role_gcode", process_role_change_gcode);
         }
+    }
+
+    // ORCA: Resonance avoidance visual marker tag
+    if (resonance_modified_speed) {
+        char buf[64];
+        sprintf(buf, ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+        gcode += buf;
     }
 
     // extrude arc or line

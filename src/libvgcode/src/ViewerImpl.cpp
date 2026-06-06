@@ -1476,7 +1476,9 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
     {
     case EViewType::FeatureType:
     {
-        return v.is_travel() ? get_option_color(move_type_to_option(v.type)) : get_extrusion_role_color(v.role);
+        return (v.is_extrusion() && v.resonance_avoided && m_settings.resonance_avoided_visible) ?
+            m_settings.resonance_avoided_color :
+            (v.is_travel() ? get_option_color(move_type_to_option(v.type)) : get_extrusion_role_color(v.role));
     }
     case EViewType::Height:
     {
@@ -1594,6 +1596,28 @@ void ViewerImpl::set_option_color(EOptionType type, const Color& color)
 void ViewerImpl::reset_default_options_colors()
 {
     m_options_colors = DEFAULT_OPTIONS_COLORS;
+}
+
+bool ViewerImpl::is_resonance_avoided_visible() const
+{
+    return m_settings.resonance_avoided_visible;
+}
+
+void ViewerImpl::toggle_resonance_avoided_visibility()
+{
+    m_settings.resonance_avoided_visible = !m_settings.resonance_avoided_visible;
+    m_settings.update_colors = true;
+}
+
+const Color& ViewerImpl::get_resonance_avoided_color() const
+{
+    return m_settings.resonance_avoided_color;
+}
+
+void ViewerImpl::set_resonance_avoided_color(const Color& color)
+{
+    m_settings.resonance_avoided_color = color;
+    m_settings.update_colors = true;
 }
 
 const ColorRange& ViewerImpl::get_color_range(EViewType type) const

@@ -122,6 +122,26 @@ void Viewer::reset_default_options_colors()
     m_impl->reset_default_options_colors();
 }
 
+bool Viewer::is_resonance_avoided_visible() const
+{
+    return m_impl->is_resonance_avoided_visible();
+}
+
+void Viewer::toggle_resonance_avoided_visibility()
+{
+    m_impl->toggle_resonance_avoided_visibility();
+}
+
+const Color& Viewer::get_resonance_avoided_color() const
+{
+    return m_impl->get_resonance_avoided_color();
+}
+
+void Viewer::set_resonance_avoided_color(const Color& color)
+{
+    m_impl->set_resonance_avoided_color(color);
+}
+
 size_t Viewer::get_tool_colors_count() const
 {
     return m_impl->get_tool_colors_count();

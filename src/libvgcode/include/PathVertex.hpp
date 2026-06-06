@@ -101,6 +101,10 @@ struct PathVertex
     // Jerk value
     //
     float jerk{ 0.0f };
+    //
+    // ORCA: Resonance avoidance visual marker
+    //
+    bool resonance_avoided{ false };
 
     //
     // Return true if the segment is an extrusion move

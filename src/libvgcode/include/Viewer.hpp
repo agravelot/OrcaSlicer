@@ -131,6 +131,22 @@ public:
     //
     void reset_default_options_colors();
     //
+    // Return true if resonance avoidance paths are visible.
+    //
+    bool is_resonance_avoided_visible() const;
+    //
+    // Toggle the visibility of resonance avoidance paths.
+    //
+    void toggle_resonance_avoided_visibility();
+    //
+    // Return the color used for resonance avoidance paths.
+    //
+    const Color& get_resonance_avoided_color() const;
+    //
+    // Set the color used for resonance avoidance paths.
+    //
+    void set_resonance_avoided_color(const Color& color);
+    //
     // Return the count of colors in the palette used to render
     // the toolpaths when the view type is EViewType::Tool.
     //
