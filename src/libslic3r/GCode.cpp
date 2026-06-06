@@ -6928,8 +6928,8 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     // ORCA: Resonance avoidance visual marker tag
     if (resonance_modified_speed) {
         char buf[64];
-        sprintf(buf, ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-        gcode += buf;
+        snprintf(buf, sizeof(buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+        gcode = std::string(buf) + gcode;
     }
 
     // extrude arc or line
