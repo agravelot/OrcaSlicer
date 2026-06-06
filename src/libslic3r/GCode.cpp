@@ -6349,6 +6349,137 @@ double GCode::calc_max_volumetric_speed(const double layer_height, const double 
     return res;
 }
 
+double GCode::_compute_resonance_safe_speed(double toolhead_speed, const ExtrusionPath &path) const
+{
+    auto parse_ranges = [](const std::string &str) -> std::vector<double> {
+        std::vector<double> ranges;
+        if (str.empty())
+            return ranges;
+        std::istringstream iss(str);
+        std::string line;
+        while (std::getline(iss, line)) {
+            boost::trim(line);
+            if (line.empty())
+                continue;
+            auto comma_pos = line.find(',');
+            if (comma_pos == std::string::npos)
+                continue;
+            try {
+                double lo = std::stod(line.substr(0, comma_pos));
+                double hi = std::stod(line.substr(comma_pos + 1));
+                if (hi > 0.0) {
+                    ranges.push_back(lo);
+                    ranges.push_back(hi);
+                }
+            } catch (...) {
+                continue;
+            }
+        }
+        return ranges;
+    };
+
+    const auto speeds_A = parse_ranges(m_config.resonance_motor_a_speeds.values.empty()
+        ? std::string() : m_config.resonance_motor_a_speeds.values.front());
+    const auto speeds_B = parse_ranges(m_config.resonance_motor_b_speeds.values.empty()
+        ? std::string() : m_config.resonance_motor_b_speeds.values.front());
+    const bool per_motor_configured =
+        speeds_A.size() >= 2 || speeds_B.size() >= 2;
+
+    if (!per_motor_configured) {
+        // Fallback: legacy toolhead-speed-only logic
+        if (toolhead_speed < m_config.max_resonance_avoidance_speed.value) {
+            double mid = m_config.min_resonance_avoidance_speed.value +
+                (m_config.max_resonance_avoidance_speed.value -
+                 m_config.min_resonance_avoidance_speed.value) / 2.0;
+            if (toolhead_speed < mid)
+                toolhead_speed = std::min(toolhead_speed, m_config.min_resonance_avoidance_speed.value);
+            else
+                toolhead_speed = m_config.max_resonance_avoidance_speed.value;
+        }
+        return toolhead_speed;
+    }
+
+    // Angle-aware per-motor resonance avoidance
+    const PrinterStructure kin = m_config.printer_structure.value;
+    if (kin == PrinterStructure::psDelta)
+        return toolhead_speed;
+
+    // Skip short segments — they never reach cruise speed, so resonance adjustment
+    // only creates artefacts without reducing ringing.
+    const Points3 &pts = path.polyline.points;
+    if (pts.size() < 2)
+        return toolhead_speed;
+
+    const double min_seg_len = m_config.resonance_min_segment_length.value;
+    if (min_seg_len > 0.0) {
+        double seg_length = 0.0;
+        for (size_t i = 1; i < pts.size(); ++i)
+            seg_length += (Vec2d(pts[i].x() - pts[i-1].x(), pts[i].y() - pts[i-1].y())).norm();
+        seg_length *= SCALING_FACTOR;
+        if (seg_length < min_seg_len)
+            return toolhead_speed;
+    }
+
+    // Compute movement direction from polyline
+    Point3 first = pts.front();
+    Point3 last  = pts.back();
+    Vec2d dir(double(last.x() - first.x()), double(last.y() - first.y()));
+    double dir_len = dir.norm();
+    if (dir_len < EPSILON) {
+        // Closed path (e.g. perimeter loop): use first segment direction
+        if (pts.size() >= 3) {
+            first = pts[1];
+            dir = Vec2d(double(last.x() - first.x()), double(last.y() - first.y()));
+            dir_len = dir.norm();
+            if (dir_len < EPSILON)
+                return toolhead_speed;
+        } else {
+            return toolhead_speed;
+        }
+    }
+
+    double cos_theta = dir.x() / dir_len;
+    double sin_theta = dir.y() / dir_len;
+
+    // Trigonometric motor speed decomposition
+    double factor_A = 0.0, factor_B = 0.0;
+    if (kin == PrinterStructure::psI3) {
+        factor_A = std::abs(cos_theta);
+        factor_B = std::abs(sin_theta);
+    } else if (kin == PrinterStructure::psCoreXY || kin == PrinterStructure::psHbot) {
+        constexpr double inv_sqrt2 = 0.7071067811865475;
+        factor_A = std::abs(cos_theta + sin_theta) * inv_sqrt2;
+        factor_B = std::abs(cos_theta - sin_theta) * inv_sqrt2;
+    } else {
+        return toolhead_speed;
+    }
+
+    const double spd_A = toolhead_speed * factor_A;
+    const double spd_B = toolhead_speed * factor_B;
+
+    double safe_speed = toolhead_speed;
+
+    auto check_motor_ranges = [&](double motor_spd, const std::vector<double> &ranges, double factor) {
+        if (factor < EPSILON)
+            return;
+        for (size_t i = 0; i + 1 < ranges.size(); i += 2) {
+            double lo = ranges[i];
+            double hi = ranges[i + 1];
+            if (hi <= 0.0)
+                continue;
+            if (motor_spd > lo && motor_spd < hi) {
+                safe_speed = std::min(safe_speed, lo / factor);
+                break;
+            }
+        }
+    };
+
+    check_motor_ranges(spd_A, speeds_A, factor_A);
+    check_motor_ranges(spd_B, speeds_B, factor_B);
+
+    return std::max(0.0, safe_speed);
+}
+
 std::string GCode::_extrude(const ExtrusionPath &path, std::string description, double speed)
 {
     std::string gcode;
@@ -6622,41 +6753,9 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         // cap speed with max_volumetric_speed anyway (even if user is not using autospeed)
         speed = std::min(speed, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
     }
-    // ORCA: resonance‑avoidance on short external perimeters
-{
-    double ref_speed = speed;  // stash the pre‑cap speed
-    if (path.role() == erExternalPerimeter
-        && m_config.resonance_avoidance.value) {
-
-        // if our original speed was above “max”, disable RA for this loop
-        if (ref_speed > m_config.max_resonance_avoidance_speed.value) {
-            m_resonance_avoidance = false;
-        }
-
-        // re‑apply volumetric cap
-        if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0) {
-            speed = std::min(
-                speed,
-                FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm
-            );
-        }
-
-            // if still in avoidance mode and under "max", adjust speed:
-            // - speeds in lower half of range: clamp down to "min"
-            // - speeds in upper half of range: boost up to "max"
-        if (m_resonance_avoidance && speed < m_config.max_resonance_avoidance_speed.value) {
-            if (speed < m_config.min_resonance_avoidance_speed.value +
-                            ((m_config.max_resonance_avoidance_speed.value - m_config.min_resonance_avoidance_speed.value) / 2)) {
-                speed = std::min(speed, m_config.min_resonance_avoidance_speed.value);
-            } else {
-                speed = m_config.max_resonance_avoidance_speed.value;
-            }
-        }
-
-        // reset flag for next segment
-        m_resonance_avoidance = true;
-    }
-}
+    // ORCA: angle-aware resonance avoidance (per-motor speed decomposition)
+    if (m_config.resonance_avoidance.value)
+        speed = _compute_resonance_safe_speed(speed, path);
     
     bool variable_speed = false;
     std::vector<ProcessedPoint> new_points {};

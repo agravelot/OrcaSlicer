@@ -4651,6 +4651,46 @@ void PrintConfigDef::init_fff_params()
     def->mode     = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(120));
 
+    def           = this->add("resonance_motor_a_speeds", coStrings);
+    def->label    = L("Motor A speeds");
+    def->tooltip  = L("Resonance danger zones for Motor A (X axis on Cartesian, 45 degree motor on CoreXY). "
+                      "Enter one pair of min and max speed (mm/s) per line, separated by a comma. "
+                      "Example:\n"
+                      "80,110\n"
+                      "150,170\n"
+                      "creates two danger zones (80-110 and 150-170). "
+                      "Leave empty to fall back to global min/max resonance avoidance speed.");
+    def->multiline = true;
+    def->full_width = true;
+    def->height   = 4;
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionStrings{""});
+
+    def           = this->add("resonance_motor_b_speeds", coStrings);
+    def->label    = L("Motor B speeds");
+    def->tooltip  = L("Resonance danger zones for Motor B (Y axis on Cartesian, 135 degree motor on CoreXY). "
+                      "Enter one pair of min and max speed (mm/s) per line, separated by a comma. "
+                      "Example:\n"
+                      "90,120\n"
+                      "creates one danger zone (90-120). "
+                      "Leave empty to disable per-motor check for this motor.");
+    def->multiline = true;
+    def->full_width = true;
+    def->height   = 4;
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionStrings{""});
+
+    def           = this->add("resonance_min_segment_length", coFloat);
+    def->label    = L("Min segment length");
+    def->tooltip  = L("Minimum path segment length (mm) for resonance avoidance to apply. "
+                      "Short segments never reach cruise speed, so adjusting speed creates artefacts "
+                      "instead of reducing ringing. Segments shorter than this value will skip "
+                      "resonance speed adjustments.");
+    def->sidetext = L("mm");
+    def->min      = 0;
+    def->mode     = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(2.0));
+
     // Orca: Input Shaping support
     def          = this->add("input_shaping_emit", coBool);
     def->label   = L("Emit input shaping");

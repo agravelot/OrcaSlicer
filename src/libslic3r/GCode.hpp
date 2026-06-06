@@ -185,7 +185,6 @@ public:
     GCode() :
     	m_origin(Vec2d::Zero()),
         m_enable_loop_clipping(true),
-        m_resonance_avoidance(true),
         m_enable_cooling_markers(false),
         m_enable_extrusion_role_markers(false),
         m_last_processor_extrusion_role(erNone),
@@ -547,8 +546,6 @@ private:
     RetractWhenCrossingPerimeters       m_retract_when_crossing_perimeters;
     TimelapsePosPicker                  m_timelapse_pos_picker;
     bool                                m_enable_loop_clipping;
-    //resonance avoidance
-    bool                                m_resonance_avoidance; 
     // If enabled, the G-code generator will put following comments at the ends
     // of the G-code lines: _EXTRUDE_SET_SPEED, _WIPE, _OVERHANG_FAN_START, _OVERHANG_FAN_END
     // Those comments are received and consumed (removed from the G-code) by the CoolingBuffer.pm Perl module.
@@ -652,6 +649,7 @@ private:
 
     double      calc_max_volumetric_speed(const double layer_height, const double line_width, const std::string co_str);
     std::string _extrude(const ExtrusionPath &path, std::string description = "", double speed = -1);
+    double      _compute_resonance_safe_speed(double toolhead_speed, const ExtrusionPath &path) const;
     bool _needSAFC(const ExtrusionPath &path);
     void print_machine_envelope(GCodeOutputStream& file, Print& print);
     void _print_first_layer_bed_temperature(GCodeOutputStream &file, Print &print, const std::string &gcode, unsigned int first_printing_extruder_id, bool wait);

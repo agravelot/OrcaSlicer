@@ -4839,9 +4839,23 @@ PageShp TabPrinter::build_kinematics_page()
     // resonance avoidance ported over from qidi slicer
     optgroup = page->new_optgroup(L("Resonance Compensation"), "param_resonance_avoidance");
     optgroup->append_single_option_line("resonance_avoidance", "printer_motion_ability#resonance-avoidance");
-    // Resonance‑avoidance speed inputs
+    // Per-motor resonance speed ranges (one min,max pair per line)
     {
-        Line resonance_line = {L("Resonance Avoidance Speed"), L""};
+        Option opt_a = optgroup->get_option("resonance_motor_a_speeds");
+        opt_a.opt.full_width = true;
+        opt_a.opt.height = 4;
+        optgroup->append_single_option_line(opt_a);
+    }
+    {
+        Option opt_b = optgroup->get_option("resonance_motor_b_speeds");
+        opt_b.opt.full_width = true;
+        opt_b.opt.height = 4;
+        optgroup->append_single_option_line(opt_b);
+    }
+    optgroup->append_single_option_line("resonance_min_segment_length", "printer_motion_ability#resonance-avoidance");
+    // Legacy global speed (fallback when per-motor ranges are not set)
+    {
+        Line resonance_line = {L("Fallback toolhead speed"), L("Legacy global speed range used when both per-motor speed ranges are empty.")};
         resonance_line.label_path = "printer_motion_ability#resonance-avoidance";
         resonance_line.append_option(optgroup->get_option("min_resonance_avoidance_speed"));
         resonance_line.append_option(optgroup->get_option("max_resonance_avoidance_speed"));
@@ -5623,6 +5637,9 @@ void TabPrinter::toggle_options()
         bool resonance_avoidance = m_config->opt_bool("resonance_avoidance");
         toggle_option("min_resonance_avoidance_speed", resonance_avoidance);
         toggle_option("max_resonance_avoidance_speed", resonance_avoidance);
+        toggle_option("resonance_motor_a_speeds", resonance_avoidance);
+        toggle_option("resonance_motor_b_speeds", resonance_avoidance);
+        toggle_option("resonance_min_segment_length", resonance_avoidance);
 
         bool input_shaping_compatible = gcf_is_marlin_firmware || gcf_is_reprap_firmware;
 
