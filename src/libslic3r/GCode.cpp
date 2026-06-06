@@ -7627,35 +7627,47 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
     }
 
 
-    // ORCA: resonance avoidance for travel moves
-    if (m_config.resonance_avoidance.value && m_config.resonance_avoidance_scope.value == ResonanceAvoidanceScope::All) {
-        const bool is_first_layer = this->on_first_layer();
-        const double base_travel_speed = is_first_layer
-            ? m_config.get_abs_value("initial_layer_travel_speed") : m_config.travel_speed.value;
-        ExtrusionPath temp_path(role);
-        temp_path.polyline = Polyline3(travel);
-        const double resonance_speed = _compute_resonance_safe_speed(base_travel_speed, temp_path);
-        if (resonance_speed != base_travel_speed) {
-            m_writer.set_travel_speed_override(resonance_speed);
-            char buf[64];
-            sprintf(buf, ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-            gcode += buf;
-        }
-    }
+    // ORCA: resonance avoidance for travel moves (applied per-segment below)
+    const bool resonance_travel_active = m_config.resonance_avoidance.value
+        && m_config.resonance_avoidance_scope.value == ResonanceAvoidanceScope::All;
 
     // if needed, write the gcode_label_objects_end then gcode_label_objects_start
     m_writer.add_object_change_labels(gcode);
 
     // use G1 because we rely on paths being straight (G0 may make round paths)
     if (travel.size() >= 2) {
+        const bool travel_is_first_layer = this->on_first_layer();
+        const double base_travel_speed = travel_is_first_layer
+            ? m_config.get_abs_value("initial_layer_travel_speed") : m_config.travel_speed.value;
+
+        auto apply_travel_resonance = [&](const Point& from, const Point& to) {
+            if (!resonance_travel_active)
+                return;
+            Vec2d seg_dir(double(to.x() - from.x()), double(to.y() - from.y()));
+            double seg_len = seg_dir.norm();
+            if (seg_len < EPSILON)
+                return;
+            seg_dir /= seg_dir.norm();
+            seg_len *= SCALING_FACTOR;
+            const double resonance_speed = _compute_resonance_safe_speed(base_travel_speed, seg_dir, seg_len);
+            if (resonance_speed != base_travel_speed) {
+                m_writer.set_travel_speed_override(resonance_speed);
+                char buf[64];
+                snprintf(buf, sizeof(buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+                gcode += buf;
+            }
+        };
+
         // Orca: use `travel_to_xyz` to ensure we start at the correct z, in case we moved z in custom/filament change gcode
         if (false/*m_spiral_vase*/) {
             // No lazy z lift for spiral vase mode
             for (size_t i = 1; i < travel.size(); ++i) {
+                apply_travel_resonance(travel.points[i - 1], travel.points[i]);
                 gcode += m_writer.travel_to_xy(this->point_to_gcode(travel.points[i]), comment);
             }
         } else {
             if (travel.size() == 2) {
+                apply_travel_resonance(travel.points[0], travel.points[1]);
                 // No extra movements emitted by avoid_crossing_perimeters, simply move to the end point with z change
                 const auto& dest2d = this->point_to_gcode(travel.points.back());
                 Vec3d dest3d(dest2d(0), dest2d(1), z == DBL_MAX ? m_nominal_z : z);
@@ -7665,6 +7677,7 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
                 // Extra movements emitted by avoid_crossing_perimeters, lift the z to normal height at the beginning, then apply the z
                 // ratio at the last point
                 for (size_t i = 1; i < travel.size(); ++i) {
+                    apply_travel_resonance(travel.points[i - 1], travel.points[i]);
                     if (i == 1) {
                         // Lift to normal z at beginning
                         Vec2d dest2d = this->point_to_gcode(travel.points[i]);
