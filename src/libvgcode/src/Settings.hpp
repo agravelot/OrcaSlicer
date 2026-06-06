@@ -72,7 +72,7 @@ struct Settings
 
         // ORCA: Resonance avoidance marker
         bool resonance_avoided_visible{ true };
-        Color resonance_avoided_color{ 255, 105, 180 };
+        Color resonance_avoided_color{ 0, 255, 255 };
 };
 
 } // namespace libvgcode
