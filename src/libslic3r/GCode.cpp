@@ -6853,7 +6853,10 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                     seg_dir /= seg_len_xy;
                 seg_len_xy *= SCALING_FACTOR;
                 const double old_spd = double(new_points[i].speed);
-                const double new_spd = _compute_resonance_safe_speed(old_spd, seg_dir, seg_len_xy);
+                double new_spd = _compute_resonance_safe_speed(old_spd, seg_dir, seg_len_xy);
+                // ORCA: re-apply volumetric cap after resonance avoidance may have raised speed
+                if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0)
+                    new_spd = std::min(new_spd, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
                 if (new_spd != old_spd) {
                     new_points[i].speed = new_spd;
                     resonance_modified_speed = true;
@@ -6869,6 +6872,9 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
             const double pre_resonance_speed = speed;
             speed = _compute_resonance_safe_speed(speed, path);
             resonance_modified_speed = (speed != pre_resonance_speed);
+            // ORCA: re-apply volumetric cap after resonance avoidance may have raised speed
+            if (resonance_modified_speed && FILAMENT_CONFIG(filament_max_volumetric_speed) > 0)
+                speed = std::min(speed, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
         }
     }
 
