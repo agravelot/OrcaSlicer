@@ -6349,6 +6349,34 @@ double GCode::calc_max_volumetric_speed(const double layer_height, const double 
     return res;
 }
 
+static std::vector<double> parse_resonance_ranges(const std::string &str)
+{
+    std::vector<double> ranges;
+    if (str.empty())
+        return ranges;
+    std::istringstream iss(str);
+    std::string line;
+    while (std::getline(iss, line)) {
+        boost::trim(line);
+        if (line.empty())
+            continue;
+        auto comma_pos = line.find(',');
+        if (comma_pos == std::string::npos)
+            continue;
+        try {
+            double lo = std::stod(line.substr(0, comma_pos));
+            double hi = std::stod(line.substr(comma_pos + 1));
+            if (lo >= 0.0 && lo < hi) {
+                ranges.push_back(lo);
+                ranges.push_back(hi);
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+    return ranges;
+}
+
 double GCode::_compute_resonance_safe_speed(double toolhead_speed, const ExtrusionPath &path) const
 {
     const Points3 &pts = path.polyline.points;
@@ -6382,36 +6410,9 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Extrusi
 
 double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &direction, double segment_length) const
 {
-    auto parse_ranges = [](const std::string &str) -> std::vector<double> {
-        std::vector<double> ranges;
-        if (str.empty())
-            return ranges;
-        std::istringstream iss(str);
-        std::string line;
-        while (std::getline(iss, line)) {
-            boost::trim(line);
-            if (line.empty())
-                continue;
-            auto comma_pos = line.find(',');
-            if (comma_pos == std::string::npos)
-                continue;
-            try {
-                double lo = std::stod(line.substr(0, comma_pos));
-                double hi = std::stod(line.substr(comma_pos + 1));
-                if (lo >= 0.0 && lo < hi) {
-                    ranges.push_back(lo);
-                    ranges.push_back(hi);
-                }
-            } catch (...) {
-                continue;
-            }
-        }
-        return ranges;
-    };
-
-    const auto speeds_A = parse_ranges(m_config.resonance_motor_a_speeds.values.empty()
+    const auto speeds_A = parse_resonance_ranges(m_config.resonance_motor_a_speeds.values.empty()
         ? std::string() : m_config.resonance_motor_a_speeds.values.front());
-    const auto speeds_B = parse_ranges(m_config.resonance_motor_b_speeds.values.empty()
+    const auto speeds_B = parse_resonance_ranges(m_config.resonance_motor_b_speeds.values.empty()
         ? std::string() : m_config.resonance_motor_b_speeds.values.front());
     const bool per_motor_configured =
         speeds_A.size() >= 2 || speeds_B.size() >= 2;
