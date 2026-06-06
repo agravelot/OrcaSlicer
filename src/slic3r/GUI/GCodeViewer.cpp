@@ -1312,6 +1312,7 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
     m_last_result_id = gcode_result.id;
     m_gcode_result = &gcode_result;
     m_move_type_counts.fill(0);
+    m_resonance_avoided_count = 0;
     for (auto& move_type_times : m_move_type_times)
         move_type_times.fill(0.0f);
     m_move_type_distances.fill(0.0f);
@@ -1329,6 +1330,8 @@ void GCodeViewer::load_as_gcode(const GCodeProcessorResult& gcode_result, const 
             else
                 m_move_type_distances[move_type] += move.travel_dist;
         }
+        if (move.resonance_avoided)
+            ++m_resonance_avoided_count;
     }
     m_only_gcode_in_preview = only_gcode;
 
@@ -1493,6 +1496,7 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
     m_loaded_as_preview = true;
 
     m_move_type_counts.fill(0);
+    m_resonance_avoided_count = 0;
     for (auto& move_type_times : m_move_type_times)
         move_type_times.fill(0.0f);
     m_move_type_distances.fill(0.0f);
@@ -1513,6 +1517,8 @@ void GCodeViewer::load_as_preview(libvgcode::GCodeInputData&& data)
                 m_move_type_distances[move_type] += std::sqrt(dx * dx + dy * dy + dz * dz);
             }
         }
+        if (vertex.resonance_avoided)
+            ++m_resonance_avoided_count;
     }
 
     m_viewer.set_extrusion_role_color(libvgcode::EGCodeExtrusionRole::Skirt,                    { 127, 255, 127 });
@@ -1563,6 +1569,7 @@ void GCodeViewer::reset()
     m_filament_diameters = std::vector<float>();
     m_filament_densities = std::vector<float>();
     m_move_type_counts.fill(0);
+    m_resonance_avoided_count = 0;
     for (auto& move_type_times : m_move_type_times)
         move_type_times.fill(0.0f);
     m_move_type_distances.fill(0.0f);
@@ -3915,11 +3922,12 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         {
             const bool resonance_visible = m_viewer.is_resonance_avoided_visible();
             const libvgcode::Color resonance_color = m_viewer.get_resonance_avoided_color();
+            const bool full_layout = offsets.size() > 4;
             std::vector<std::pair<std::string, float>> columns_offsets;
             columns_offsets.push_back({ _u8L("Resonance avoided"), offsets[0] });
             columns_offsets.push_back({ "", offsets[1] });
             columns_offsets.push_back({ "", offsets[2] });
-            columns_offsets.push_back({ "", offsets[3] });
+            columns_offsets.push_back({ full_layout ? format_compact_count(m_resonance_avoided_count) : "", offsets[3] });
             columns_offsets.push_back({ "", offsets[4] });
             append_item(EItemType::Rect, libvgcode::convert(resonance_color), columns_offsets,
                 true, offsets.back(), resonance_visible, [this]() {
