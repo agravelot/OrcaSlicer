@@ -4169,6 +4169,8 @@ void GCodeProcessor::process_G1(const std::array<std::optional<double>, 4>& axes
 
     // store move
     store_move_vertex(type);
+
+    m_resonance_avoided = false;
 }
 
 void GCodeProcessor::process_VG1(const GCodeReader::GCodeLine& line)
@@ -5612,8 +5614,6 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         m_print_z,
         m_resonance_avoided
     });
-
-    m_resonance_avoided = false;
 
     if (type == EMoveType::Seam) {
         m_seams_count++;
