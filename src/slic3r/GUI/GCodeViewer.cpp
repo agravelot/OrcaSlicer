@@ -4009,16 +4009,27 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     {
         const bool resonance_visible = m_viewer.is_resonance_avoided_visible();
         const libvgcode::Color resonance_color = m_viewer.get_resonance_avoided_color();
+        const bool travel_visible = m_viewer.is_option_visible(libvgcode::EOptionType::Travels);
         const std::string distance_text = format_distance(m_resonance_avoided_distance);
         const std::string count_text = format_compact_count(m_resonance_avoided_count);
         const std::string info = distance_text + "  " + count_text;
-        offsets = calculate_offsets({ { _u8L("Options"), { distance_text, info }}, { _u8L("Display"), {""}} }, icon_size);
-        append_headers({ {_u8L("Options"), offsets[0] }, { _u8L("Display"), offsets[1]} });
+        offsets = calculate_offsets({
+            {_u8L("Options"), {_u8L("Resonance avoided"), _u8L("Travel")}},
+            {"", {info}},
+            {_u8L("Display"), {""}}
+        }, icon_size);
+        append_headers({{_u8L("Options"), offsets[0]}, {_u8L("Display"), offsets[2]}});
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 3.0f));
         append_item(EItemType::Rect, libvgcode::convert(resonance_color),
             { {_u8L("Resonance avoided"), offsets[0]}, {info, offsets[1]} },
             true, predictable_icon_pos, resonance_visible, [this]() {
                 m_viewer.toggle_resonance_avoided_visibility();
+                update_moves_slider();
+            });
+        append_item(EItemType::None, libvgcode::convert(m_viewer.get_option_color(libvgcode::EOptionType::Travels)),
+            { {_u8L("Travel"), offsets[0]} },
+            true, predictable_icon_pos, travel_visible, [this, travel_visible]() {
+                m_viewer.toggle_option_visibility(libvgcode::EOptionType::Travels);
                 update_moves_slider();
             });
         ImGui::PopStyleVar(1);
