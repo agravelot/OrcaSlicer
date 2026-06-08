@@ -7181,12 +7181,12 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                             }
                         }
                     }
+                    if (resonance_tag) {
+                        char tag_buf[64];
+                        snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+                        gcode += std::string(tag_buf);
+                    }
                     if (std::abs(last_set_speed_F - seg_F) > EPSILON) {
-                        if (resonance_tag) {
-                            char tag_buf[64];
-                            snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-                            gcode += std::string(tag_buf);
-                        }
                         gcode += m_writer.set_speed(seg_F, "", comment);
                         last_set_speed_F = seg_F;
                     }
@@ -7266,12 +7266,12 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                                     }
                                 }
                             }
+                            if (resonance_tag) {
+                                char tag_buf[64];
+                                snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+                                gcode += std::string(tag_buf);
+                            }
                             if (std::abs(last_set_speed_F_arc - seg_F) > EPSILON) {
-                                if (resonance_tag) {
-                                    char tag_buf[64];
-                                    snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-                                    gcode += std::string(tag_buf);
-                                }
                                 gcode += m_writer.set_speed(seg_F, "", comment);
                                 last_set_speed_F_arc = seg_F;
                             }
