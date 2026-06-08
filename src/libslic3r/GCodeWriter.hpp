@@ -127,6 +127,7 @@ public:
     void set_is_first_layer(bool bval) { m_is_first_layer = bval; }
     GCodeFlavor get_gcode_flavor() const { return config.gcode_flavor; }
 
+    // One-shot: consumed by the next travel_to_xy / travel_to_xyz, then reset to 0.
     void set_travel_speed_override(double speed) { m_travel_speed_override = speed; }
 
     // Returns whether this flavor supports separate print and travel acceleration.
@@ -183,7 +184,7 @@ public:
     bool            m_is_bbl_printers = false;
     double          m_current_speed;
     bool            m_is_first_layer = true;
-    double          m_travel_speed_override = 0.0;
+    double          m_travel_speed_override = 0.0; // one-shot, consumed by next travel move
 
     enum class Acceleration {
         Travel,
