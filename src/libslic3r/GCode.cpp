@@ -6392,8 +6392,23 @@ ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, con
     const auto& speeds_B = m_resonance_speeds_B;
     const bool  per_motor_configured = speeds_A.size() >= 2 || speeds_B.size() >= 2;
 
-    if (!per_motor_configured)
+    // Legacy global fallback: single zone from min/max when per-motor ranges not configured
+    if (!per_motor_configured) {
+        const double lo = m_config.min_resonance_avoidance_speed.value;
+        const double hi = m_config.max_resonance_avoidance_speed.value;
+        if (lo >= 0.0 && lo < hi) {
+            if (toolhead_speed > lo && toolhead_speed < hi) {
+                bounds.is_in_danger = true;
+                bounds.danger_lo    = lo;
+                bounds.danger_hi    = hi;
+            } else if (toolhead_speed >= hi) {
+                // Zone entirely below — store for volumetric cap guard
+                bounds.danger_lo = lo;
+                bounds.danger_hi = hi;
+            }
+        }
         return bounds;
+    }
 
     const PrinterStructure kin = m_config.printer_structure.value;
     if (kin == PrinterStructure::psDelta)
