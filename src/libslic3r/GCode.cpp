@@ -2454,7 +2454,9 @@ static BambuBedType to_bambu_bed_type(BedType type)
     return bambu_bed_type;
 }
 
-void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGeneratorCallback thumbnail_cb)
+static std::vector<double> parse_resonance_ranges(const std::string& str);
+
+void GCode::_do_export(Print& print, GCodeOutputStream& file, ThumbnailsGeneratorCallback thumbnail_cb)
 {
     PROFILE_FUNC();
 
@@ -6731,8 +6733,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         speed = std::min(speed, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
     }
     // ORCA: angle-aware resonance avoidance (per-motor speed decomposition)
-    bool resonance_modified_speed = false;
-    bool resonance_scope_active = false;
+    bool resonance_scope_active   = false;
     if (m_config.resonance_avoidance.value) {
         const auto scope = m_config.resonance_avoidance_scope.value;
         resonance_scope_active = (scope == ResonanceAvoidanceScope::All ||
@@ -6803,11 +6804,37 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                                          [speed](const ProcessedPoint &p) { return fabs(double(p.speed) - speed) > 1; });
     }
 
-    // ORCA: apply resonance avoidance after overhang slowdown
+    // ORCA: per-segment resonance helper (direction unit vector, segment length in mm)
+    std::vector<char> resonance_seg;
+    auto apply_resonance = [&](double base_spd, const Vec2d& dir, double seg_len) -> std::pair<double, bool> {
+        if (!resonance_scope_active || seg_len < EPSILON)
+            return {base_spd, false};
+        auto bounds = _compute_resonance_speeds(base_spd, dir, seg_len);
+        double new_spd = base_spd;
+        if (bounds.is_in_danger) {
+            if (m_config.resonance_avoidance_mode.value == ResonanceAvoidanceMode::Nearest) {
+                double choice = (base_spd - bounds.danger_lo <= bounds.danger_hi - base_spd) ? bounds.danger_lo : bounds.danger_hi;
+                new_spd       = std::min(base_spd, choice);
+            } else {
+                new_spd = std::min(base_spd, bounds.danger_lo);
+            }
+        }
+        if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0) {
+            double vol_cap = FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm;
+            double capped  = std::min(new_spd, vol_cap);
+            if (bounds.danger_lo > 0 && capped > bounds.danger_lo && capped < bounds.danger_hi)
+                capped = bounds.danger_lo;
+            if (capped != new_spd)
+                new_spd = capped;
+        }
+        return {new_spd, new_spd != base_spd};
+    };
+
     if (resonance_scope_active) {
         if (variable_speed && !new_points.empty()) {
-            const Points3 &pts = path.polyline.points;
-            Vec2d prev_pt = pts.empty() ? Vec2d(0, 0) : Vec2d(pts.front().x(), pts.front().y());
+            resonance_seg.assign(new_points.size(), 0);
+            const Points3& pts = path.polyline.points;
+            Vec2d prev_pt      = pts.empty() ? Vec2d(0, 0) : Vec2d(pts.front().x(), pts.front().y());
             for (size_t i = 0; i < new_points.size(); ++i) {
                 Vec2d curr_pt(new_points[i].p.x(), new_points[i].p.y());
                 Vec2d seg_dir = curr_pt - prev_pt;
@@ -6820,77 +6847,13 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                     seg_dir /= seg_len_xy;
                 seg_len_xy *= SCALING_FACTOR;
                 const double old_spd = double(new_points[i].speed);
-                auto bounds = _compute_resonance_speeds(old_spd, seg_dir, seg_len_xy);
-                double new_spd = old_spd;
-                if (bounds.is_in_danger) {
-                    if (m_config.resonance_avoidance_mode.value == ResonanceAvoidanceMode::Nearest) {
-                        double choice = (old_spd - bounds.danger_lo <= bounds.danger_hi - old_spd) ? bounds.danger_lo : bounds.danger_hi;
-                        new_spd = std::min(old_spd, choice);
-                    } else {
-                        new_spd = std::min(old_spd, bounds.danger_lo);
-                    }
-                }
-                // ORCA: apply volumetric cap without pushing into resonance danger zone
-                if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0) {
-                    double vol_cap = FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm;
-                    double capped = std::min(new_spd, vol_cap);
-                    if (bounds.danger_lo > 0 && capped > bounds.danger_lo && capped < bounds.danger_hi)
-                        capped = bounds.danger_lo;
-                    if (capped != new_spd)
-                        new_spd = capped;
-                }
-                if (new_spd != old_spd) {
+                auto [new_spd, modified] = apply_resonance(old_spd, seg_dir, seg_len_xy);
+                if (modified) {
                     new_points[i].speed = new_spd;
-                    resonance_modified_speed = true;
+                    resonance_seg[i]    = 1;
                 }
                 prev_pt = curr_pt;
             }
-            if (resonance_modified_speed) {
-                speed = new_points[0].speed;
-                for (size_t i = 1; i < new_points.size(); ++i)
-                    speed = std::max(speed, double(new_points[i].speed));
-            }
-        } else {
-            // Compute direction and total segment length from path
-            Vec2d path_dir;
-            double path_len = 0.0;
-            const Points3 &pts = path.polyline.points;
-            if (pts.size() >= 2) {
-                for (size_t i = 1; i < pts.size(); ++i)
-                    path_len += (Vec2d(pts[i].x() - pts[i - 1].x(), pts[i].y() - pts[i - 1].y())).norm();
-                path_len *= SCALING_FACTOR;
-                auto first = pts.front(), last = pts.back();
-                path_dir = Vec2d(double(last.x() - first.x()), double(last.y() - first.y()));
-                double dir_len = path_dir.norm();
-                if (dir_len < EPSILON && pts.size() >= 3) {
-                    path_dir = Vec2d(double(last.x() - pts[1].x()), double(last.y() - pts[1].y()));
-                    dir_len = path_dir.norm();
-                }
-                if (dir_len > EPSILON)
-                    path_dir /= dir_len;
-            }
-            const double pre_resonance_speed = speed;
-            auto bounds = _compute_resonance_speeds(speed, path_dir, path_len);
-            double new_speed = speed;
-            if (bounds.is_in_danger) {
-                if (m_config.resonance_avoidance_mode.value == ResonanceAvoidanceMode::Nearest) {
-                    double choice = (speed - bounds.danger_lo <= bounds.danger_hi - speed) ? bounds.danger_lo : bounds.danger_hi;
-                    new_speed = std::min(speed, choice);
-                } else {
-                    new_speed = std::min(speed, bounds.danger_lo);
-                }
-            }
-            // ORCA: apply volumetric cap without pushing into resonance danger zone
-            if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0) {
-                double vol_cap = FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm;
-                double capped = std::min(new_speed, vol_cap);
-                if (bounds.danger_lo > 0 && capped > bounds.danger_lo && capped < bounds.danger_hi)
-                    capped = bounds.danger_lo;
-                if (capped != new_speed)
-                    new_speed = capped;
-            }
-            resonance_modified_speed = (new_speed != pre_resonance_speed);
-            speed = new_speed;
         }
     }
 
@@ -6944,13 +6907,6 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
             append_role_gcode("filament_change_extrusion_role_gcode", filament_role_change_gcode);
             append_role_gcode("process_change_extrusion_role_gcode", process_role_change_gcode);
         }
-    }
-
-    // ORCA: Resonance avoidance visual marker tag
-    if (resonance_modified_speed) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-        gcode = std::string(buf) + gcode;
     }
 
     // extrude arc or line
@@ -7156,8 +7112,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
             }
             // ORCA: End of adaptive PA code segment
         }
-        
-        gcode += m_writer.set_speed(F, "", comment);
+
         {
             if (m_enable_cooling_markers) {
                 if (enable_overhang_bridge_fan) {
@@ -7179,6 +7134,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                 double path_length = 0.;
                 double total_length = sloped == nullptr ? 0. : path.polyline.length() * SCALING_FACTOR;
                 double saved_z      = m_writer.get_position().z();
+                double last_set_speed_F = -1.0;
 
                 for (const Line3& line : path.polyline.lines()) {
                     std::string tempDescription = description;
@@ -7194,6 +7150,30 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                         if (m_config.gcode_comments && oldE > 0 && oldE != dE) {
                             tempDescription += Slic3r::format(" | Old Flow Value: %0.5f Length: %0.5f",oldE, line_length);
                         }
+                    }
+                    // Per-segment resonance (only for normal flat extrusions)
+                    double seg_F = F;
+                    bool resonance_tag = false;
+                    if (resonance_scope_active && !path.z_contoured && sloped == nullptr) {
+                        Vec2d dir(line.b.x() - line.a.x(), line.b.y() - line.a.y());
+                        double seg_len_mm = dir.norm() * SCALING_FACTOR;
+                        if (seg_len_mm > EPSILON) {
+                            dir.normalize();
+                            auto [new_spd, modified] = apply_resonance(speed, dir, seg_len_mm);
+                            if (modified) {
+                                seg_F = new_spd * 60;
+                                resonance_tag = true;
+                            }
+                        }
+                    }
+                    if (std::abs(last_set_speed_F - seg_F) > EPSILON) {
+                        if (resonance_tag) {
+                            char tag_buf[64];
+                            snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+                            gcode += std::string(tag_buf);
+                        }
+                        gcode += m_writer.set_speed(seg_F, "", comment);
+                        last_set_speed_F = seg_F;
                     }
                     if (path.z_contoured) {
                         // ZAA: Z anti-aliased extrusion with variable Z per point
@@ -7234,6 +7214,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
             } else {
                 // BBS: start to generate gcode from arc fitting data which includes line and arc
                 const std::vector<PathFittingData>& fitting_result = path.polyline.fitting_result;
+                double last_set_speed_F_arc = -1.0;
                 for (size_t fitting_index = 0; fitting_index < fitting_result.size(); fitting_index++) {
                     std::string tempDescription = description;
                     switch (fitting_result[fitting_index].path_type) {
@@ -7255,16 +7236,44 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                                     tempDescription += Slic3r::format(" | Old Flow Value: %0.5f Length: %0.5f",oldE, line_length);
                                 }
                             }
-                            gcode += m_writer.extrude_to_xy(
-                                this->point_to_gcode(line.b),
-                                dE,
-                                GCodeWriter::full_gcode_comment ? tempDescription : "", path.is_force_no_extrusion());
+                            // Per-segment resonance for linear sub-segments in arc-fitted paths
+                            double seg_F = F;
+                            bool resonance_tag = false;
+                            if (resonance_scope_active) {
+                                Vec2d dir(line.b.x() - line.a.x(), line.b.y() - line.a.y());
+                                double seg_len_mm = dir.norm() * SCALING_FACTOR;
+                                if (seg_len_mm > EPSILON) {
+                                    dir.normalize();
+                                    auto [new_spd, modified] = apply_resonance(speed, dir, seg_len_mm);
+                                    if (modified) {
+                                        seg_F = new_spd * 60;
+                                        resonance_tag = true;
+                                    }
+                                }
+                            }
+                            if (std::abs(last_set_speed_F_arc - seg_F) > EPSILON) {
+                                if (resonance_tag) {
+                                    char tag_buf[64];
+                                    snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+                                    gcode += std::string(tag_buf);
+                                }
+                                gcode += m_writer.set_speed(seg_F, "", comment);
+                                last_set_speed_F_arc = seg_F;
+                            }
+                            gcode += m_writer.extrude_to_xy(this->point_to_gcode(line.b), dE,
+                                                            GCodeWriter::full_gcode_comment ? tempDescription : "",
+                                                            path.is_force_no_extrusion());
                         }
                         break;
                     }
                     case EMovePathType::Arc_move_cw:
                     case EMovePathType::Arc_move_ccw: {
-                        const ArcSegment& arc = fitting_result[fitting_index].arc_data;
+                        // Restore base speed before arc (no resonance on G2/G3)
+                        if (std::abs(last_set_speed_F_arc - F) > EPSILON) {
+                            gcode += m_writer.set_speed(F, "", comment);
+                            last_set_speed_F_arc = F;
+                        }
+                        const ArcSegment& arc   = fitting_result[fitting_index].arc_data;
                         const double arc_length = fitting_result[fitting_index].arc_data.length * SCALING_FACTOR;
                         if (arc_length < EPSILON)
                             continue;
@@ -7383,8 +7392,14 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                     gcode += buf;
                     m_last_mm3_mm = _mm3_per_mm;
                 }
-            }// ORCA: End of adaptive PA code segment
-            
+            } // ORCA: End of adaptive PA code segment
+
+            // Per-segment resonance tag
+            if (resonance_scope_active && !resonance_seg.empty() && i > 0 && resonance_seg[i - 1]) {
+                char tag_buf[64];
+                snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
+                gcode += std::string(tag_buf);
+            }
             // Ignore small speed variations - emit speed change if the delta between current and new is greater than 60mm/min / 1mm/sec
             // Reset speed to F if delta to F is less than 1mm/sec
             if ((std::abs(last_set_speed - new_speed) > 60)) {
