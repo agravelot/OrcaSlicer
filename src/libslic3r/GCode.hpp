@@ -179,6 +179,12 @@ struct LayerResult {
     static LayerResult make_nop_layer_result() { return {"", std::numeric_limits<coord_t>::max(), false, false, true}; }
 };
 
+struct ResonanceSpeedBounds {
+    double danger_lo = 0.0;
+    double danger_hi = 0.0;
+    bool   is_in_danger = false;
+};
+
 class GCode {
 
 public:
@@ -651,6 +657,7 @@ private:
     std::string _extrude(const ExtrusionPath &path, std::string description = "", double speed = -1);
     double      _compute_resonance_safe_speed(double toolhead_speed, const ExtrusionPath &path) const;
     double      _compute_resonance_safe_speed(double toolhead_speed, const Vec2d &direction, double segment_length) const;
+    ResonanceSpeedBounds _compute_resonance_speeds(double toolhead_speed, const Vec2d &direction, double segment_length) const;
     bool _needSAFC(const ExtrusionPath &path);
     void print_machine_envelope(GCodeOutputStream& file, Print& print);
     void _print_first_layer_bed_temperature(GCodeOutputStream &file, Print &print, const std::string &gcode, unsigned int first_printing_extruder_id, bool wait);

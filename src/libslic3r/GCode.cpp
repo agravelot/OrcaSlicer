@@ -6419,6 +6419,7 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &
 
     const auto rmode = m_config.resonance_avoidance_mode.value;
 
+  // Fallback: Non kinematic aware resonance avoidance implementatiton
     if (!per_motor_configured) {
         if (toolhead_speed < m_config.max_resonance_avoidance_speed.value) {
             const double lo = m_config.min_resonance_avoidance_speed.value;
@@ -6488,6 +6489,84 @@ double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &
     check_motor_ranges(spd_B, speeds_B, factor_B);
 
     return std::max(0.0, safe_speed);
+}
+
+ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, const Vec2d &direction, double segment_length) const
+{
+    ResonanceSpeedBounds bounds;
+
+    const auto speeds_A = parse_resonance_ranges(m_config.resonance_motor_a_speeds.values.empty()
+        ? std::string() : m_config.resonance_motor_a_speeds.values.front());
+    const auto speeds_B = parse_resonance_ranges(m_config.resonance_motor_b_speeds.values.empty()
+        ? std::string() : m_config.resonance_motor_b_speeds.values.front());
+    const bool per_motor_configured =
+        speeds_A.size() >= 2 || speeds_B.size() >= 2;
+
+    if (!per_motor_configured)
+        return bounds;
+
+    const PrinterStructure kin = m_config.printer_structure.value;
+    if (kin == PrinterStructure::psDelta)
+        return bounds;
+
+    const double min_seg_len = m_config.resonance_min_segment_length.value;
+    if (min_seg_len > 0.0 && segment_length < min_seg_len)
+        return bounds;
+
+    const double cos_theta = direction.x();
+    const double sin_theta = direction.y();
+
+    double factor_A = 0.0, factor_B = 0.0;
+    if (kin == PrinterStructure::psI3) {
+        factor_A = std::abs(cos_theta);
+        factor_B = std::abs(sin_theta);
+    } else if (kin == PrinterStructure::psCoreXY || kin == PrinterStructure::psHbot) {
+        constexpr double inv_sqrt2 = 0.7071067811865475;
+        factor_A = std::abs(cos_theta + sin_theta) * inv_sqrt2;
+        factor_B = std::abs(cos_theta - sin_theta) * inv_sqrt2;
+    } else {
+        return bounds;
+    }
+
+    const double spd_A = toolhead_speed * factor_A;
+    const double spd_B = toolhead_speed * factor_B;
+
+    // Highest danger zone below toolhead speed (for volumetric cap guard)
+    double below_lo = 0.0, below_hi = 0.0;
+
+    auto check_ranges = [&](double motor_spd, const std::vector<double> &ranges, double factor) {
+        if (factor < EPSILON)
+            return;
+        for (size_t i = 0; i + 1 < ranges.size(); i += 2) {
+            double lo_toolhead = ranges[i] / factor;
+            double hi_toolhead = ranges[i + 1] / factor;
+
+            // Track the highest zone entirely below the current toolhead speed
+            if (hi_toolhead < toolhead_speed && lo_toolhead > below_lo) {
+                below_lo = lo_toolhead;
+                below_hi = hi_toolhead;
+            }
+
+            // Check if motor speed falls in this danger zone
+            if (motor_spd > ranges[i] && motor_spd < ranges[i + 1]) {
+                bounds.is_in_danger = true;
+                if (bounds.danger_lo == 0.0 || lo_toolhead < bounds.danger_lo)
+                    bounds.danger_lo = lo_toolhead;
+                if (bounds.danger_hi == 0.0 || hi_toolhead > bounds.danger_hi)
+                    bounds.danger_hi = hi_toolhead;
+            }
+        }
+    };
+
+    check_ranges(spd_A, speeds_A, factor_A);
+    check_ranges(spd_B, speeds_B, factor_B);
+
+    if (!bounds.is_in_danger) {
+        bounds.danger_lo = below_lo;
+        bounds.danger_hi = below_hi;
+    }
+
+    return bounds;
 }
 
 std::string GCode::_extrude(const ExtrusionPath &path, std::string description, double speed)
@@ -6853,10 +6932,25 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                     seg_dir /= seg_len_xy;
                 seg_len_xy *= SCALING_FACTOR;
                 const double old_spd = double(new_points[i].speed);
-                double new_spd = _compute_resonance_safe_speed(old_spd, seg_dir, seg_len_xy);
-                // ORCA: re-apply volumetric cap after resonance avoidance may have raised speed
-                if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0)
-                    new_spd = std::min(new_spd, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
+                auto bounds = _compute_resonance_speeds(old_spd, seg_dir, seg_len_xy);
+                double new_spd = old_spd;
+                if (bounds.is_in_danger) {
+                    if (m_config.resonance_avoidance_mode.value == ResonanceAvoidanceMode::Nearest) {
+                        double choice = (old_spd - bounds.danger_lo <= bounds.danger_hi - old_spd) ? bounds.danger_lo : bounds.danger_hi;
+                        new_spd = std::min(old_spd, choice);
+                    } else {
+                        new_spd = std::min(old_spd, bounds.danger_lo);
+                    }
+                }
+                // ORCA: apply volumetric cap without pushing into resonance danger zone
+                if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0) {
+                    double vol_cap = FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm;
+                    double capped = std::min(new_spd, vol_cap);
+                    if (bounds.danger_lo > 0 && capped > bounds.danger_lo && capped < bounds.danger_hi)
+                        capped = bounds.danger_lo;
+                    if (capped != new_spd)
+                        new_spd = capped;
+                }
                 if (new_spd != old_spd) {
                     new_points[i].speed = new_spd;
                     resonance_modified_speed = true;
@@ -6869,12 +6963,46 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                     speed = std::max(speed, double(new_points[i].speed));
             }
         } else {
+            // Compute direction and total segment length from path
+            Vec2d path_dir;
+            double path_len = 0.0;
+            const Points3 &pts = path.polyline.points;
+            if (pts.size() >= 2) {
+                for (size_t i = 1; i < pts.size(); ++i)
+                    path_len += (Vec2d(pts[i].x() - pts[i - 1].x(), pts[i].y() - pts[i - 1].y())).norm();
+                path_len *= SCALING_FACTOR;
+                auto first = pts.front(), last = pts.back();
+                path_dir = Vec2d(double(last.x() - first.x()), double(last.y() - first.y()));
+                double dir_len = path_dir.norm();
+                if (dir_len < EPSILON && pts.size() >= 3) {
+                    path_dir = Vec2d(double(last.x() - pts[1].x()), double(last.y() - pts[1].y()));
+                    dir_len = path_dir.norm();
+                }
+                if (dir_len > EPSILON)
+                    path_dir /= dir_len;
+            }
             const double pre_resonance_speed = speed;
-            speed = _compute_resonance_safe_speed(speed, path);
-            resonance_modified_speed = (speed != pre_resonance_speed);
-            // ORCA: re-apply volumetric cap after resonance avoidance may have raised speed
-            if (resonance_modified_speed && FILAMENT_CONFIG(filament_max_volumetric_speed) > 0)
-                speed = std::min(speed, FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm);
+            auto bounds = _compute_resonance_speeds(speed, path_dir, path_len);
+            double new_speed = speed;
+            if (bounds.is_in_danger) {
+                if (m_config.resonance_avoidance_mode.value == ResonanceAvoidanceMode::Nearest) {
+                    double choice = (speed - bounds.danger_lo <= bounds.danger_hi - speed) ? bounds.danger_lo : bounds.danger_hi;
+                    new_speed = std::min(speed, choice);
+                } else {
+                    new_speed = std::min(speed, bounds.danger_lo);
+                }
+            }
+            // ORCA: apply volumetric cap without pushing into resonance danger zone
+            if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0) {
+                double vol_cap = FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm;
+                double capped = std::min(new_speed, vol_cap);
+                if (bounds.danger_lo > 0 && capped > bounds.danger_lo && capped < bounds.danger_hi)
+                    capped = bounds.danger_lo;
+                if (capped != new_speed)
+                    new_speed = capped;
+            }
+            resonance_modified_speed = (new_speed != pre_resonance_speed);
+            speed = new_speed;
         }
     }
 
