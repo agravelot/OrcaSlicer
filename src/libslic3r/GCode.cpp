@@ -6384,6 +6384,11 @@ static std::vector<double> parse_resonance_ranges(const std::string &str)
     return ranges;
 }
 
+static std::string resonance_avoided_tag()
+{
+    return ";" + GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided) + "\n";
+}
+
 ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, const Vec2d &direction, double segment_length) const
 {
     ResonanceSpeedBounds bounds;
@@ -7182,9 +7187,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                         }
                     }
                     if (resonance_tag) {
-                        char tag_buf[64];
-                        snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-                        gcode += std::string(tag_buf);
+                        gcode += resonance_avoided_tag();
                     }
                     if (std::abs(last_set_speed_F - seg_F) > EPSILON) {
                         gcode += m_writer.set_speed(seg_F, "", comment);
@@ -7267,9 +7270,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
                                 }
                             }
                             if (resonance_tag) {
-                                char tag_buf[64];
-                                snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-                                gcode += std::string(tag_buf);
+                                gcode += resonance_avoided_tag();
                             }
                             if (std::abs(last_set_speed_F_arc - seg_F) > EPSILON) {
                                 gcode += m_writer.set_speed(seg_F, "", comment);
@@ -7411,9 +7412,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
 
             // Per-segment resonance tag
             if (resonance_scope_active && !resonance_seg.empty() && i > 0 && resonance_seg[i - 1]) {
-                char tag_buf[64];
-                snprintf(tag_buf, sizeof(tag_buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-                gcode += std::string(tag_buf);
+                gcode += resonance_avoided_tag();
             }
             // Ignore small speed variations - emit speed change if the delta between current and new is greater than 60mm/min / 1mm/sec
             // Reset speed to F if delta to F is less than 1mm/sec
@@ -7715,9 +7714,7 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
             }
             if (resonance_speed != base_travel_speed) {
                 m_writer.set_travel_speed_override(resonance_speed);
-                char buf[64];
-                snprintf(buf, sizeof(buf), ";%s\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided).c_str());
-                gcode += buf;
+                gcode += resonance_avoided_tag();
             }
         };
 
