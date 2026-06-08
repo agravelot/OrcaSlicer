@@ -6377,120 +6377,6 @@ static std::vector<double> parse_resonance_ranges(const std::string &str)
     return ranges;
 }
 
-double GCode::_compute_resonance_safe_speed(double toolhead_speed, const ExtrusionPath &path) const
-{
-    const Points3 &pts = path.polyline.points;
-    if (pts.size() < 2)
-        return toolhead_speed;
-
-    double seg_length = 0.0;
-    for (size_t i = 1; i < pts.size(); ++i)
-        seg_length += (Vec2d(pts[i].x() - pts[i-1].x(), pts[i].y() - pts[i-1].y())).norm();
-    seg_length *= SCALING_FACTOR;
-
-    Point3 first = pts.front();
-    Point3 last  = pts.back();
-    Vec2d dir(double(last.x() - first.x()), double(last.y() - first.y()));
-    double dir_len = dir.norm();
-    if (dir_len < EPSILON) {
-        if (pts.size() >= 3) {
-            first = pts[1];
-            dir = Vec2d(double(last.x() - first.x()), double(last.y() - first.y()));
-            dir_len = dir.norm();
-            if (dir_len < EPSILON)
-                return toolhead_speed;
-        } else {
-            return toolhead_speed;
-        }
-    }
-    dir /= dir_len;
-
-    return _compute_resonance_safe_speed(toolhead_speed, dir, seg_length);
-}
-
-double GCode::_compute_resonance_safe_speed(double toolhead_speed, const Vec2d &direction, double segment_length) const
-{
-    const auto speeds_A = parse_resonance_ranges(m_config.resonance_motor_a_speeds.values.empty()
-        ? std::string() : m_config.resonance_motor_a_speeds.values.front());
-    const auto speeds_B = parse_resonance_ranges(m_config.resonance_motor_b_speeds.values.empty()
-        ? std::string() : m_config.resonance_motor_b_speeds.values.front());
-    const bool per_motor_configured =
-        speeds_A.size() >= 2 || speeds_B.size() >= 2;
-
-    const auto rmode = m_config.resonance_avoidance_mode.value;
-
-  // Fallback: Non kinematic aware resonance avoidance implementatiton
-    if (!per_motor_configured) {
-        if (toolhead_speed < m_config.max_resonance_avoidance_speed.value) {
-            const double lo = m_config.min_resonance_avoidance_speed.value;
-            const double hi = m_config.max_resonance_avoidance_speed.value;
-            if (rmode == ResonanceAvoidanceMode::Nearest) {
-                toolhead_speed = (toolhead_speed - lo <= hi - toolhead_speed) ? lo : hi;
-            } else {
-                double mid = lo + (hi - lo) / 2.0;
-                if (toolhead_speed < mid)
-                    toolhead_speed = std::min(toolhead_speed, lo);
-                else
-                    toolhead_speed = hi;
-            }
-        }
-        return toolhead_speed;
-    }
-
-    const PrinterStructure kin = m_config.printer_structure.value;
-    if (kin == PrinterStructure::psDelta)
-        return toolhead_speed;
-
-    const double min_seg_len = m_config.resonance_min_segment_length.value;
-    if (min_seg_len > 0.0 && segment_length < min_seg_len)
-        return toolhead_speed;
-
-    const double cos_theta = direction.x();
-    const double sin_theta = direction.y();
-
-    double factor_A = 0.0, factor_B = 0.0;
-    if (kin == PrinterStructure::psI3) {
-        factor_A = std::abs(cos_theta);
-        factor_B = std::abs(sin_theta);
-    } else if (kin == PrinterStructure::psCoreXY || kin == PrinterStructure::psHbot) {
-        constexpr double inv_sqrt2 = 0.7071067811865475;
-        factor_A = std::abs(cos_theta + sin_theta) * inv_sqrt2;
-        factor_B = std::abs(cos_theta - sin_theta) * inv_sqrt2;
-    } else {
-        return toolhead_speed;
-    }
-
-    const double spd_A = toolhead_speed * factor_A;
-    const double spd_B = toolhead_speed * factor_B;
-
-    double safe_speed = toolhead_speed;
-
-    auto check_motor_ranges = [&](double motor_spd, const std::vector<double> &ranges, double factor) {
-        if (factor < EPSILON)
-            return;
-        for (size_t i = 0; i + 1 < ranges.size(); i += 2) {
-            double lo = ranges[i];
-            double hi = ranges[i + 1];
-            if (motor_spd > lo && motor_spd < hi) {
-                if (rmode == ResonanceAvoidanceMode::Nearest) {
-                    const double lo_toolhead = lo / factor;
-                    const double hi_toolhead = hi / factor;
-                    const double clamped = (toolhead_speed - lo_toolhead <= hi_toolhead - toolhead_speed) ? lo_toolhead : hi_toolhead;
-                    safe_speed = std::min(safe_speed, clamped);
-                } else {
-                    safe_speed = std::min(safe_speed, lo / factor);
-                }
-                break;
-            }
-        }
-    };
-
-    check_motor_ranges(spd_A, speeds_A, factor_A);
-    check_motor_ranges(spd_B, speeds_B, factor_B);
-
-    return std::max(0.0, safe_speed);
-}
-
 ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, const Vec2d &direction, double segment_length) const
 {
     ResonanceSpeedBounds bounds;
@@ -7783,7 +7669,18 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
                 return;
             seg_dir /= seg_dir.norm();
             seg_len *= SCALING_FACTOR;
-            const double resonance_speed = _compute_resonance_safe_speed(base_travel_speed, seg_dir, seg_len);
+            auto resonance_bounds  = _compute_resonance_speeds(base_travel_speed, seg_dir, seg_len);
+            double resonance_speed = base_travel_speed;
+            if (resonance_bounds.is_in_danger) {
+                if (m_config.resonance_avoidance_mode.value == ResonanceAvoidanceMode::Nearest) {
+                    double choice   = (base_travel_speed - resonance_bounds.danger_lo <= resonance_bounds.danger_hi - base_travel_speed) ?
+                                          resonance_bounds.danger_lo :
+                                          resonance_bounds.danger_hi;
+                    resonance_speed = std::min(base_travel_speed, choice);
+                } else {
+                    resonance_speed = std::min(base_travel_speed, resonance_bounds.danger_lo);
+                }
+            }
             if (resonance_speed != base_travel_speed) {
                 m_writer.set_travel_speed_override(resonance_speed);
                 char buf[64];

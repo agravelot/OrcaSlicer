@@ -655,8 +655,6 @@ private:
 
     double      calc_max_volumetric_speed(const double layer_height, const double line_width, const std::string co_str);
     std::string _extrude(const ExtrusionPath &path, std::string description = "", double speed = -1);
-    double      _compute_resonance_safe_speed(double toolhead_speed, const ExtrusionPath &path) const;
-    double      _compute_resonance_safe_speed(double toolhead_speed, const Vec2d &direction, double segment_length) const;
     ResonanceSpeedBounds _compute_resonance_speeds(double toolhead_speed, const Vec2d &direction, double segment_length) const;
     bool _needSAFC(const ExtrusionPath &path);
     void print_machine_envelope(GCodeOutputStream& file, Print& print);
