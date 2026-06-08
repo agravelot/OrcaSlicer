@@ -100,6 +100,9 @@ static std::string get_view_type_string(libvgcode::EViewType view_type)
 // ORCA: Add Pressure Advance visualization support
     else if (view_type == libvgcode::EViewType::PressureAdvance)
         return _u8L("Pressure Advance");
+// ORCA: Add Resonance Avoidance visualization support
+    else if (view_type == libvgcode::EViewType::ResonanceAvoidance)
+        return _u8L("Resonance Avoidance");
     return "";
 }
 
