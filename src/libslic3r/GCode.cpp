@@ -6389,6 +6389,17 @@ static std::string resonance_avoided_tag()
     return ";" + GCodeProcessor::reserved_tag(GCodeProcessor::ETags::ResonanceAvoided) + "\n";
 }
 
+static double apply_resonance_clamp(double base_spd, const ResonanceSpeedBounds &bounds, ResonanceAvoidanceMode mode)
+{
+    if (!bounds.is_in_danger)
+        return base_spd;
+    if (mode == ResonanceAvoidanceMode::Nearest) {
+        double choice = (base_spd - bounds.danger_lo <= bounds.danger_hi - base_spd) ? bounds.danger_lo : bounds.danger_hi;
+        return std::min(base_spd, choice);
+    }
+    return std::min(base_spd, bounds.danger_lo);
+}
+
 ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, const Vec2d &direction, double segment_length) const
 {
     ResonanceSpeedBounds bounds;
@@ -6830,15 +6841,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         if (!resonance_scope_active || seg_len < EPSILON)
             return {base_spd, false};
         auto bounds = _compute_resonance_speeds(base_spd, dir, seg_len);
-        double new_spd = base_spd;
-        if (bounds.is_in_danger) {
-            if (m_config.resonance_avoidance_mode.value == ResonanceAvoidanceMode::Nearest) {
-                double choice = (base_spd - bounds.danger_lo <= bounds.danger_hi - base_spd) ? bounds.danger_lo : bounds.danger_hi;
-                new_spd       = std::min(base_spd, choice);
-            } else {
-                new_spd = std::min(base_spd, bounds.danger_lo);
-            }
-        }
+        double new_spd = apply_resonance_clamp(base_spd, bounds, m_config.resonance_avoidance_mode.value);
         if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0) {
             double vol_cap = FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm;
             double capped  = std::min(new_spd, vol_cap);
@@ -7701,17 +7704,7 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
             seg_dir /= seg_dir.norm();
             seg_len *= SCALING_FACTOR;
             auto resonance_bounds  = _compute_resonance_speeds(base_travel_speed, seg_dir, seg_len);
-            double resonance_speed = base_travel_speed;
-            if (resonance_bounds.is_in_danger) {
-                if (m_config.resonance_avoidance_mode.value == ResonanceAvoidanceMode::Nearest) {
-                    double choice   = (base_travel_speed - resonance_bounds.danger_lo <= resonance_bounds.danger_hi - base_travel_speed) ?
-                                          resonance_bounds.danger_lo :
-                                          resonance_bounds.danger_hi;
-                    resonance_speed = std::min(base_travel_speed, choice);
-                } else {
-                    resonance_speed = std::min(base_travel_speed, resonance_bounds.danger_lo);
-                }
-            }
+            double resonance_speed = apply_resonance_clamp(base_travel_speed, resonance_bounds, m_config.resonance_avoidance_mode.value);
             if (resonance_speed != base_travel_speed) {
                 m_writer.set_travel_speed_override(resonance_speed);
                 gcode += resonance_avoided_tag();
