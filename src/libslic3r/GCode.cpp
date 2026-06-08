@@ -6437,7 +6437,7 @@ ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, con
     const double spd_B = toolhead_speed * factor_B;
 
     // Highest danger zone below toolhead speed (for volumetric cap guard)
-    double below_lo = 0.0, below_hi = 0.0;
+    double below_lo = -1.0, below_hi = -1.0;
 
     auto check_ranges = [&](double motor_spd, const std::vector<double> &ranges, double factor) {
         if (factor < EPSILON)
@@ -6455,9 +6455,9 @@ ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, con
             // Check if motor speed falls in this danger zone
             if (motor_spd > ranges[i] && motor_spd < ranges[i + 1]) {
                 bounds.is_in_danger = true;
-                if (bounds.danger_lo == 0.0 || lo_toolhead < bounds.danger_lo)
+                if (bounds.danger_lo < 0.0 || lo_toolhead < bounds.danger_lo)
                     bounds.danger_lo = lo_toolhead;
-                if (bounds.danger_hi == 0.0 || hi_toolhead > bounds.danger_hi)
+                if (bounds.danger_hi < 0.0 || hi_toolhead > bounds.danger_hi)
                     bounds.danger_hi = hi_toolhead;
             }
         }
@@ -6837,7 +6837,7 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         if (FILAMENT_CONFIG(filament_max_volumetric_speed) > 0) {
             double vol_cap = FILAMENT_CONFIG(filament_max_volumetric_speed) / _mm3_per_mm;
             double capped  = std::min(new_spd, vol_cap);
-            if (bounds.danger_lo > 0 && capped > bounds.danger_lo && capped < bounds.danger_hi)
+            if (bounds.danger_lo >= 0.0 && capped > bounds.danger_lo && capped < bounds.danger_hi)
                 capped = bounds.danger_lo;
             if (capped != new_spd)
                 new_spd = capped;

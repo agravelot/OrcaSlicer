@@ -180,8 +180,8 @@ struct LayerResult {
 };
 
 struct ResonanceSpeedBounds {
-    double danger_lo = 0.0;
-    double danger_hi = 0.0;
+    double danger_lo = -1.0;
+    double danger_hi = -1.0;
     bool   is_in_danger = false;
 };
 
