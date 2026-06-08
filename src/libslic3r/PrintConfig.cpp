@@ -4654,7 +4654,7 @@ void PrintConfigDef::init_fff_params()
     def->enum_values   = {"All", "OuterWall"};
     def->enum_labels   = {L("All"), L("Outer Wall")};
     def->mode    = comAdvanced;
-    def->set_default_value(new ConfigOptionEnum<ResonanceAvoidanceScope>(ResonanceAvoidanceScope::All));
+    def->set_default_value(new ConfigOptionEnum<ResonanceAvoidanceScope>(ResonanceAvoidanceScope::OuterWall));
 
     def          = this->add("resonance_avoidance_mode", coEnum);
     def->label   = L("Mode");
