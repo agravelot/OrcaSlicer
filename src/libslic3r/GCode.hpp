@@ -511,6 +511,8 @@ private:
        methods. */
     Vec2d                               m_origin;
     FullPrintConfig                     m_config;
+    std::vector<double>                 m_resonance_speeds_A;
+    std::vector<double>                 m_resonance_speeds_B;
     DynamicConfig                       m_calib_config;
     // scaled G-code resolution
     double                              m_scaled_resolution;

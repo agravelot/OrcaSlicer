@@ -2528,6 +2528,11 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     this->apply_print_config(print.config());
     m_config.apply(print.default_object_config());
     m_config.apply(print.default_region_config());
+    // Cache resonance ranges (print-level, won't change after this point)
+    m_resonance_speeds_A = parse_resonance_ranges(
+        print.config().resonance_motor_a_speeds.values.empty() ? std::string() : print.config().resonance_motor_a_speeds.values.front());
+    m_resonance_speeds_B = parse_resonance_ranges(
+        print.config().resonance_motor_b_speeds.values.empty() ? std::string() : print.config().resonance_motor_b_speeds.values.front());
 
     //m_volumetric_speed = DoExport::autospeed_volumetric_limit(print);
     print.throw_if_canceled();
@@ -6381,12 +6386,9 @@ ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, con
 {
     ResonanceSpeedBounds bounds;
 
-    const auto speeds_A = parse_resonance_ranges(m_config.resonance_motor_a_speeds.values.empty()
-        ? std::string() : m_config.resonance_motor_a_speeds.values.front());
-    const auto speeds_B = parse_resonance_ranges(m_config.resonance_motor_b_speeds.values.empty()
-        ? std::string() : m_config.resonance_motor_b_speeds.values.front());
-    const bool per_motor_configured =
-        speeds_A.size() >= 2 || speeds_B.size() >= 2;
+    const auto& speeds_A = m_resonance_speeds_A;
+    const auto& speeds_B = m_resonance_speeds_B;
+    const bool  per_motor_configured = speeds_A.size() >= 2 || speeds_B.size() >= 2;
 
     if (!per_motor_configured)
         return bounds;
