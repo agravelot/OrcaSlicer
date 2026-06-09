@@ -6395,7 +6395,7 @@ static double apply_resonance_clamp(double base_spd, const ResonanceSpeedBounds 
         return base_spd;
     if (mode == ResonanceAvoidanceMode::Nearest) {
         double choice = (base_spd - bounds.danger_lo <= bounds.danger_hi - base_spd) ? bounds.danger_lo : bounds.danger_hi;
-        return std::min(base_spd, choice);
+        return choice;
     }
     return std::min(base_spd, bounds.danger_lo);
 }
@@ -6449,38 +6449,56 @@ ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, con
         return bounds;
     }
 
-    const double spd_A = toolhead_speed * factor_A;
-    const double spd_B = toolhead_speed * factor_B;
+    struct Interval {
+        double lo;
+        double hi;
+    };
+    std::vector<Interval> intervals;
+    intervals.reserve((speeds_A.size() + speeds_B.size()) / 2);
+
+    if (factor_A >= EPSILON) {
+        for (size_t i = 0; i + 1 < speeds_A.size(); i += 2) {
+            intervals.push_back({speeds_A[i] / factor_A, speeds_A[i + 1] / factor_A});
+        }
+    }
+    if (factor_B >= EPSILON) {
+        for (size_t i = 0; i + 1 < speeds_B.size(); i += 2) {
+            intervals.push_back({speeds_B[i] / factor_B, speeds_B[i + 1] / factor_B});
+        }
+    }
+
+    std::sort(intervals.begin(), intervals.end(), [](const Interval& a, const Interval& b) {
+        return a.lo < b.lo;
+    });
+
+    std::vector<Interval> merged;
+    for (const auto& interval : intervals) {
+        if (merged.empty() || merged.back().hi < interval.lo) {
+            merged.push_back(interval);
+        } else {
+            merged.back().hi = std::max(merged.back().hi, interval.hi);
+        }
+    }
 
     // Highest danger zone below toolhead speed (for volumetric cap guard)
     double below_lo = -1.0, below_hi = -1.0;
 
-    auto check_ranges = [&](double motor_spd, const std::vector<double> &ranges, double factor) {
-        if (factor < EPSILON)
-            return;
-        for (size_t i = 0; i + 1 < ranges.size(); i += 2) {
-            double lo_toolhead = ranges[i] / factor;
-            double hi_toolhead = ranges[i + 1] / factor;
-
-            // Track the highest zone entirely below the current toolhead speed
-            if (hi_toolhead < toolhead_speed && lo_toolhead > below_lo) {
-                below_lo = lo_toolhead;
-                below_hi = hi_toolhead;
-            }
-
-            // Check if motor speed falls in this danger zone
-            if (motor_spd > ranges[i] && motor_spd < ranges[i + 1]) {
-                bounds.is_in_danger = true;
-                if (bounds.danger_lo < 0.0 || lo_toolhead < bounds.danger_lo)
-                    bounds.danger_lo = lo_toolhead;
-                if (bounds.danger_hi < 0.0 || hi_toolhead > bounds.danger_hi)
-                    bounds.danger_hi = hi_toolhead;
+    for (const auto& interval : merged) {
+        // Track the highest zone entirely below the current toolhead speed
+        if (interval.hi <= toolhead_speed) {
+            if (interval.lo > below_lo) {
+                below_lo = interval.lo;
+                below_hi = interval.hi;
             }
         }
-    };
 
-    check_ranges(spd_A, speeds_A, factor_A);
-    check_ranges(spd_B, speeds_B, factor_B);
+        // Check if toolhead speed falls in this merged danger zone
+        if (toolhead_speed > interval.lo && toolhead_speed < interval.hi) {
+            bounds.is_in_danger = true;
+            bounds.danger_lo = interval.lo;
+            bounds.danger_hi = interval.hi;
+        }
+    }
 
     if (!bounds.is_in_danger) {
         bounds.danger_lo = below_lo;

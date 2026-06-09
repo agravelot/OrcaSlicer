@@ -244,6 +244,15 @@ public:
     bool            enable_cooling_markers() const { return m_enable_cooling_markers; }
     std::string     extrusion_role_to_string_for_parser(const ExtrusionRole &);
 
+    // Helpers for resonance tests
+    void set_resonance_speeds_for_test(const std::vector<double> &speeds_A, const std::vector<double> &speeds_B) {
+        m_resonance_speeds_A = speeds_A;
+        m_resonance_speeds_B = speeds_B;
+    }
+    ResonanceSpeedBounds compute_resonance_speeds_for_test(double toolhead_speed, const Vec2d &direction, double segment_length) const {
+        return _compute_resonance_speeds(toolhead_speed, direction, segment_length);
+    }
+
     // Calculate the interpolated value for the current layer between start_value and end_value.
     // Step will create equal layers steps from first to last value.
     // Step = 0 means gradual interpolation finishing at last value.
