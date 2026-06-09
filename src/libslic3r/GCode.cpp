@@ -6400,6 +6400,10 @@ static double apply_resonance_clamp(double base_spd, const ResonanceSpeedBounds 
     return std::min(base_spd, bounds.danger_lo);
 }
 
+double GCode::apply_resonance_clamp_for_test(double base_spd, const ResonanceSpeedBounds &bounds, ResonanceAvoidanceMode mode) {
+    return apply_resonance_clamp(base_spd, bounds, mode);
+}
+
 ResonanceSpeedBounds GCode::_compute_resonance_speeds(double toolhead_speed, const Vec2d &direction, double segment_length) const
 {
     ResonanceSpeedBounds bounds;

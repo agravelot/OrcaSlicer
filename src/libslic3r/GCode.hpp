@@ -252,6 +252,7 @@ public:
     ResonanceSpeedBounds compute_resonance_speeds_for_test(double toolhead_speed, const Vec2d &direction, double segment_length) const {
         return _compute_resonance_speeds(toolhead_speed, direction, segment_length);
     }
+    static double apply_resonance_clamp_for_test(double base_spd, const ResonanceSpeedBounds &bounds, ResonanceAvoidanceMode mode);
 
     // Calculate the interpolated value for the current layer between start_value and end_value.
     // Step will create equal layers steps from first to last value.
